@@ -1,0 +1,980 @@
+
+---
+title: "MCA"
+#author: "Ajay Attuchirayil Krishnankutty"
+#date: "10/10/2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r MCA_setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#Clearing everything
+rm(list = ls())
+graphics.off()
+
+
+library(ExPosition)
+library(InPosition)
+library(xlsx)
+library(corrplot)
+
+library(dplyr)
+library(ggplot2)
+library(PTCA4CATA)
+library(data4PCCAR)
+library(corrplot)
+```
+
+
+# Multiple Correspondence Analysis
+MCA is an extension to the CA, wherein we analyze the relationship between several categorical variables in a data table.
+Indicator Matrix - Matrix comprising of 0's and 1's.
+So, MCA is techincally a CA done on indicator matrix of a data table.
+Even quantitative variables can be analyzed by binning them,once binned these are again converted to binary values using disjunctive coding(one hot encoding).
+
+
+## Data set: IBM-HR-Emplyee-WithAttrition
+
+The dataset given is regarding IBM employees, available to the HR section of the company to take decisions regarding attrition.
+
+It consists of data of 237 employees (rows), with 32 variables(columns) defining each employee based on position,education,department etc.
+
+
+```{r MCA_data_set,echo=FALSE}
+# Dataset ----
+ibm.emp.data <- read.xlsx("IBM-HR-Emplyee-WithAttrition.xlsx", sheetName = "Sheet1",header=TRUE)
+rownames(ibm.emp.data) <- ibm.emp.data$Subj
+ibm.emp.data <- ibm.emp.data[-c(1)]
+cols <- c('Age','Gender','Education','MonthlyIncome','TotalWorkingYears','JobSatisfaction')
+head(ibm.emp.data[cols])
+
+```
+
+### Extracting the data
+```{r}
+new.ibm.emp.data <- ibm.emp.data[sapply(ibm.emp.data, function(x) !is.factor(x))]
+
+```
+
+### Heat Map
+
+After removing the factor variables we have mostly numeric ones, but in those also we have some ordinal ones,
+and few have very higher range than others like income etc.
+
+So I tried plotting different heatmaps including ordinal ones, income ones (with log), and the remaining quant ones together.
+
+- Income Map : Monthly is higher than Daily rate which is again higher than Hourly Rate,Monthly rate seems to be                      higher throughout.
+- Ordinal Ones : Employees on higher Job Level have stock options
+                  Employees with good work life balance have better satisfaction all through
+                 
+
+```{r include=FALSE}
+
+#dev.new()
+color4Var <- prettyGraphs::prettyGraphsColorSelection(ncol(new.ibm.emp.data))
+
+corrMatBurt.list <- phi2Mat4BurtTable(new.ibm.emp.data)
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+corr4MCA.r <- corrplot::corrplot(
+as.matrix(corrMatBurt.list$phi2.mat),
+method="color", col=col(200),
+type="upper",
+addCoef.col = "black", # Add coefficient of correlation
+tl.col=color4Var,
+tl.srt = 45, #Text label color and rotation
+number.cex = .5,
+diag = TRUE # needed to have the color of variables correct
+)
+
+
+
+```
+
+
+**Design Variable : Job Level**
+
+```{r MCA_DESIGN, include=FALSE,echo=FALSE}
+#Create an empty list, called DESIGN
+DESIGN <- list()
+
+
+#We take all the unique values possible in the specified column if the dataframe
+DESIGN$rows$JobLevel$labels <- unique(ibm.emp.data$JobLevel)
+
+
+#Storing the categorical values in a vector
+DESIGN$rows$JobLevel$vec <- ibm.emp.data$JobLevel
+
+#Convert the vector to a matrix
+DESIGN$rows$JobLevel$mat <- makeNominalData(as.matrix(DESIGN$rows$JobLevel$vec))
+
+```
+
+
+
+
+```{r MCA_colors_2, include=FALSE,echo=FALSE}
+
+#As our group has 5 levels we specify same number of colors
+
+
+DESIGN$rows$JobLevel$color_groups <- c("red", "green", "magenta", "blue","yellow")
+
+
+#plot(c(1:5), pch=15, cex=4, col=DESIGN$rows$JobLevel$color_groups) 
+
+#First, copy the group names
+DESIGN$rows$JobLevel$color_observ <- as.matrix(DESIGN$rows$JobLevel$vec)
+
+#Then, for each group, replace the group name with the group's color
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="1")]  <- DESIGN$rows$JobLevel$color_groups[1]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="2")]  <- DESIGN$rows$JobLevel$color_groups[2]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="3")]  <- DESIGN$rows$JobLevel$color_groups[3]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="4")]  <- DESIGN$rows$JobLevel$color_groups[4]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="5")]  <- DESIGN$rows$JobLevel$color_groups[5]
+
+```
+
+
+
+
+
+### Binning the variables
+- We bin the variables in the data table to prepare for MCA, for that we first plot the histograms for the quantitative variables.  
+- First histograms are plotted, then we break it such that equal amount of data comes under each partitions.  
+- The ordinal ones have been used as it is. 
+```{r include=FALSE,echo=FALSE}
+new_df =data.frame()
+
+#Age ---- NOrmal Distribution
+
+hist(new.ibm.emp.data[,1],breaks = 25, main="Age", xlab = "Values")
+#abline(v = c(28,32,39), col = "red", lwd =2) # plot the cutoff line
+
+qts <- quantile(new.ibm.emp.data[,1])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+age <- cut(new.ibm.emp.data[,1],breaks=c(min(new.ibm.emp.data[,1])-1,qts,max(new.ibm.emp.data[,1])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(age),new.ibm.emp.data[,1],method = "spearman") #Checking for consistency
+
+
+#MOnthly Income ---- 
+
+#hist(new.ibm.emp.data[,2],breaks = 25, main="Length", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,2])[2:4]
+#abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+monthly_inc <- cut(new.ibm.emp.data[,2],breaks=c(min(new.ibm.emp.data[,2])-1,qts,max(new.ibm.emp.data[,2])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(monthly_inc),new.ibm.emp.data[,2],method = "spearman") #Checking for consistency
+
+
+
+#Daily Rate ---- 
+
+hist(new.ibm.emp.data[,3],breaks = 25, main="Daily Rate", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,3])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+daily_rt <- cut(new.ibm.emp.data[,3],breaks=c(min(new.ibm.emp.data[,3])-1,qts,max(new.ibm.emp.data[,3])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(daily_rt),new.ibm.emp.data[,3],method = "spearman") #Checking for consistency
+
+
+#Hourly Rate ---- 
+
+hist(new.ibm.emp.data[,4],breaks = 25, main="Length", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,4])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+hourly_rt <- cut(new.ibm.emp.data[,4],breaks=c(min(new.ibm.emp.data[,4])-1,qts,max(new.ibm.emp.data[,4])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(hourly_rt),new.ibm.emp.data[,4],method = "spearman") #Checking for consistency
+
+
+
+#Monthly Rate ---- 
+
+hist(new.ibm.emp.data[,5],breaks = 25, main="Monthly Rate", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,5])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+monthly_rt <- cut(new.ibm.emp.data[,5],breaks=c(min(new.ibm.emp.data[,5])-1,qts,max(new.ibm.emp.data[,5])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(monthly_rt),new.ibm.emp.data[,5],method = "spearman") #Checking for consistency
+
+
+
+#Distance From HOme ---- 
+
+
+hist(new.ibm.emp.data[,6],breaks = 25, main="Distance From Home", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,6])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+dist_frm_Hm <- cut(new.ibm.emp.data[,6],breaks=c(min(new.ibm.emp.data[,6])-1,qts,max(new.ibm.emp.data[,6])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(dist_frm_Hm),new.ibm.emp.data[,6],method = "spearman") #Checking for consistency
+
+
+
+#Num of companies worked----
+
+#unique(new.ibm.emp.data[,12])
+#table(new.ibm.emp.data[,12])
+hist(new.ibm.emp.data[,12],breaks = 25, main="Num of companies worked", xlab = "Values")
+abline(v = c(0,1,5), col = "red", lwd =2) # plot the cutoff line
+
+num_comp <- cut(new.ibm.emp.data[,12],breaks=c(min(new.ibm.emp.data[,12])-1,c(0,1,5),max(new.ibm.emp.data[,12])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(num_comp),new.ibm.emp.data[,12],method = "spearman") #Checking for consistency
+
+
+#Percent salary hike----
+
+#unique(new.ibm.emp.data[,13])
+#table(new.ibm.emp.data[,13])
+
+hist(new.ibm.emp.data[,13],breaks = 25, main="Percent Salary Hike", xlab = "Values")
+abline(v = c(11,13,17,20), col = "red", lwd =2) # plot the cutoff line
+
+per_hike <- cut(new.ibm.emp.data[,13],breaks=c(min(new.ibm.emp.data[,13])-1,c(11,13,17,20),max(new.ibm.emp.data[,13])+1),labels=c(1,2,3,4,5))
+
+cor(as.numeric(per_hike),new.ibm.emp.data[,13],method = "spearman") #Checking for consistency
+
+
+
+#Total Working Years----
+
+#unique(new.ibm.emp.data[,14])
+#table(new.ibm.emp.data[,14])
+
+hist(new.ibm.emp.data[,14],breaks = 25, main="Total Working Years", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,14])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+tot_Wrk_yrs <- cut(new.ibm.emp.data[,14],breaks=c(min(new.ibm.emp.data[,14])-1,qts,max(new.ibm.emp.data[,14])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(tot_Wrk_yrs),new.ibm.emp.data[,14],method = "spearman") #Checking for consistency
+
+
+#Train Time Last Year----
+#unique(new.ibm.emp.data[,15])
+#table(new.ibm.emp.data[,15])
+hist(new.ibm.emp.data[,15],breaks = 25, main="Train Time since Last Year", xlab = "Values")
+
+abline(v = c(1,2,4), col = "red", lwd =2) # plot the cutoff line
+
+train_tim_yrs <- cut(new.ibm.emp.data[,15],breaks=c(min(new.ibm.emp.data[,15])-1,c(1,2,4),max(new.ibm.emp.data[,15])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(train_tim_yrs),new.ibm.emp.data[,15],method = "spearman") #Checking for consistency
+
+
+#Years at Company----
+
+#unique(new.ibm.emp.data[,17])
+#table(new.ibm.emp.data[,17])
+#hist(new.ibm.emp.data[,17],breaks = 25, main="Length", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,17])[2:4]
+#abline(v = c(1,2,4), col = "red", lwd =2) # plot the cutoff line
+
+yr_at_comp <- cut(new.ibm.emp.data[,17],breaks=c(min(new.ibm.emp.data[,17])-1,qts,max(new.ibm.emp.data[,17])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(yr_at_comp),new.ibm.emp.data[,17],method = "spearman") #Checking for consistency
+
+
+#Years In Current Role----
+
+#unique(new.ibm.emp.data[,18])
+#table(new.ibm.emp.data[,18])
+hist(new.ibm.emp.data[,18],breaks = 25, main="Years In Current Role", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,18])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+yr_in_role <- cut(new.ibm.emp.data[,18],breaks=c(min(new.ibm.emp.data[,18])-1,qts,max(new.ibm.emp.data[,18])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(yr_in_role),new.ibm.emp.data[,18],method = "spearman") #Checking for consistency
+
+
+
+
+#Years since last promotion----
+
+#unique(new.ibm.emp.data[,19])
+#table(new.ibm.emp.data[,19])
+#hist(new.ibm.emp.data[,19],breaks = 25, main="Length", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,19])[2:4]
+#abline(v = c(1,2,4), col = "red", lwd =2) # plot the cutoff line
+
+yr_since_Promo <- cut(new.ibm.emp.data[,19],breaks=c(min(new.ibm.emp.data[,19])-1,qts,max(new.ibm.emp.data[,19])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(yr_since_Promo),new.ibm.emp.data[,19],method = "spearman") #Checking for consistency
+
+
+#Years with Manager----
+
+#unique(new.ibm.emp.data[,20])
+#table(new.ibm.emp.data[,20])
+#hist(new.ibm.emp.data[,20],breaks = 25, main="Length", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,20])[2:4]
+#abline(v = c(1,2,4), col = "red", lwd =2) # plot the cutoff line
+
+yr_wid_mgr <- cut(new.ibm.emp.data[,20],breaks=c(min(new.ibm.emp.data[,20])-1,qts,max(new.ibm.emp.data[,20])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(yr_wid_mgr),new.ibm.emp.data[,20],method = "spearman") #Checking for consistency
+
+
+#new_df = cbind(age_recode,monthly_recode,daily_recode,hourly_recode,monthly_rate_recode,dist_frm_Hm,num_comp,per_hike,tot_Wrk_yrs,train_tim_yrs,yr_at_comp,yr_in_role,yr_in_role,yr_wid_mgr)
+
+
+##ORDINAL ------- *********************************************************
+
+#Performance Rating ---- 
+
+#unique(new.ibm.emp.data[,7])
+#hist(new.ibm.emp.data[,7],breaks = 25, main="Length", xlab = "Values")
+perf_rat = new.ibm.emp.data[,7]
+
+
+#Education ---- 
+#unique(new.ibm.emp.data[,8])
+education = new.ibm.emp.data[,8]
+
+
+#Job Involvement ---- 
+
+#unique(new.ibm.emp.data[,9])
+job_involve = new.ibm.emp.data[,9]
+
+#Job Level----
+#unique(new.ibm.emp.data[,10])
+#job_level = new.ibm.emp.data[,10]
+
+
+#Stock Level Level----
+#unique(new.ibm.emp.data[,11])
+
+stock_level = new.ibm.emp.data[,11]
+
+#Work Life Balance----
+#unique(new.ibm.emp.data[,16])
+#table(new.ibm.emp.data[,16])
+wrk_lif_bal = new.ibm.emp.data[,16]
+
+#Env Satisfaction----
+#unique(new.ibm.emp.data[,21])
+#table(new.ibm.emp.data[,21])
+env_sat = new.ibm.emp.data[,21]
+
+#Job Satisfaction  22
+job_sat = new.ibm.emp.data[,22]
+
+#Relation Satisfaction  23
+rel_sat = new.ibm.emp.data[,23]
+
+new_df = as.data.frame(cbind(age,monthly_inc,daily_rt,hourly_rt,monthly_rt,dist_frm_Hm,num_comp,per_hike,tot_Wrk_yrs,train_tim_yrs,yr_at_comp,yr_in_role,yr_since_Promo,yr_wid_mgr,education,perf_rat,job_involve,stock_level,wrk_lif_bal,env_sat,job_sat,rel_sat))
+#job_level
+#
+
+dim(new_df)
+
+
+
+```
+
+### Binning using histograms
+We now plot some of the histograms for the binning process.
+```{r}
+
+#Age ---- NOrmal Distribution
+
+hist(new.ibm.emp.data[,1],breaks = 25, main="Age", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,1])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+#MOnthly Income ---- 
+
+hist(new.ibm.emp.data[,2],breaks = 25, main="Length", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,2])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+#Daily Rate ---- 
+
+hist(new.ibm.emp.data[,3],breaks = 25, main="Daily Rate", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,3])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+#Percent salary hike----
+
+hist(new.ibm.emp.data[,13],breaks = 25, main="Percent Salary Hike", xlab = "Values")
+abline(v = c(11,13,17,20), col = "red", lwd =2) # plot the cutoff line
+
+
+#Total Working Years----
+
+hist(new.ibm.emp.data[,14],breaks = 25, main="Total Working Years", xlab = "Values")
+qts <- quantile(new.ibm.emp.data[,14])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+
+```
+
+
+```{r eval=FALSE,include=FALSE}
+
+
+str(new_df)
+
+library(dummies)
+#new_df_1 <- as.data.frame(new_df)
+#str(new_df_1)
+new_df_1 <- as.factor(new_df)
+str(new_df_1)
+new_df_1 <- ExPosition::makeNominalData(new_df)
+#df_mat <-dummy.data.frame(new_df_1)
+
+df_mat_1 <- as.matrix(new_df_1)
+
+
+df_mat_heat <- (t(df_mat_1) %*% (df_mat_1))
+
+#col4J.IBM <- prettyGraphsColorSelection(NCOL(new.ibm.emp.data))
+c000.heatMapIJ.IBM.ordinal <- makeggHeatMap4CT(df_mat_heat,
+                                       fontSize.x = 15)
+print(c000.heatMapIJ.IBM.ordinal)
+
+```
+
+
+## Running MCA
+```{r}
+
+# Running the Symmetric MCA
+resMCA.sym  <- epMCA(new_df, symmetric = TRUE,make_data_nominal = TRUE, 
+                     graphs = FALSE,DESIGN=ibm.emp.data$JobLevel)
+
+# to run a plain MCA but asymetric
+resMCA.asym <- epMCA(new_df, symmetric = FALSE,make_data_nominal = TRUE, 
+                     graphs = FALSE,DESIGN=ibm.emp.data$JobLevel)
+
+#Inference MCA
+resMCA.inf <- epMCA.inference.battery(new_df, make_data_nominal = TRUE, 
+                                      graphs = FALSE,DESIGN=ibm.emp.data$JobLevel)
+
+
+```
+
+### Scree Plot
+
+We get close to 5 components showing significant inportance in the permutation test
+```{r}
+EigenValues <- resMCA.asym$ExPosition.Data$eigs
+
+
+PlotScree(ev = EigenValues, 
+       p.ev =  resMCA.inf$Inference.Data$components$p.vals,
+       title = "Scree Plot with Permutation Test - MCA",
+       plotKaiser = TRUE
+          )
+a001a.screePlot <- recordPlot()
+#dev.new()
+print(a001a.screePlot)
+
+```
+
+
+
+```{r echo=FALSE}
+# CA graphs ----
+# to make life easier ----
+#Fi.a <- resMCA.asym$ExPosition.Data$fi ##Additional
+Fj.a <- resMCA.asym$ExPosition.Data$fj
+Fi   <- resMCA.sym$ExPosition.Data$fi
+Fj   <- resMCA.sym$ExPosition.Data$fj
+Cj <- resMCA.sym$ExPosition.Data$cj
+Eigs <- resMCA.sym$ExPosition.Data$eigs
+tau <- resMCA.sym$ExPosition.Data$t
+
+color4Var <- prettyGraphs::prettyGraphsColorSelection(ncol(new_df))
+col4Levels <- data4PCCAR::coloringLevels(rownames(Fj), color4Var)
+col4Labels <- col4Levels$color4Levels
+
+varCtr <- data4PCCAR::ctr4Variables(Cj)
+
+
+
+absCtrVar <- as.matrix(varCtr) %*% diag(Eigs)
+varCtr12 <- (absCtrVar[,1] + absCtrVar[,2]) /(Eigs[1] + Eigs[2])
+importantVar <- (varCtr12 >= 1 / length(varCtr12))
+col4ImportantVar <- color4Var
+col4NS <- 'white'
+col4ImportantVar[!importantVar] <- col4NS
+#Color for importance in  variables
+col4Levels.imp <- data4PCCAR::coloringLevels(rownames(Fj),col4ImportantVar)
+
+#Labels
+labels4MCA_12 <- createxyLabels.gen(x_axis = 1, y_axis = 2,
+              lambda = Eigs,tau =tau)
+
+labels4MCA_23 <- createxyLabels.gen(x_axis = 2, y_axis = 3,
+              lambda = Eigs,tau =tau)
+
+# constraints -----
+# first get the constraints correct
+constraints.sym <- minmaxHelper(mat1 = Fi, mat2  = Fj)
+constraints.asym <- minmaxHelper(mat1 = Fi, mat2  = Fj.a)    ##Can add Fi.a
+#constraints.sup <- minmaxHelper(mat1 = rbind(Fi, HA.sup$fii), mat2  = rbind(Fj, punct.sup$fjj) )
+```
+
+
+
+### I Map for DImension 1 & 2
+```{r}
+
+baseMap.i.12 <- createFactorMap(Fi, constraints = constraints.sym,
+                             col.points = DESIGN$rows$JobLevel$color_observ,
+                             col.labels = 'darkorchid',title = "Factor scores by Job Level(Symmetric)",display.labels = FALSE)  
+
+FS_JL_12 <- baseMap.i.12$zeMap + labels4MCA_12
+
+print(FS_JL_12)
+
+```
+
+### I Map for DImension 2 & 3
+```{r}
+
+baseMap.i.23 <- createFactorMap(Fi, constraints = constraints.sym,
+                             col.points = DESIGN$rows$JobLevel$color_observ,
+                             col.labels = 'darkorchid',title = "Factor scores by Job Level(Symmetric)",
+                             display.labels = FALSE,axis1 = 2,axis2 = 3)  
+
+FS_JL_23 <- baseMap.i.23$zeMap + labels4MCA_23
+
+print(FS_JL_23)
+
+```
+
+### J Map for Dimension 1 & 2
+```{r}
+baseMap.j.12 <- createFactorMap(Fj, constraints = constraints.sym,
+                             col.points = col4Levels.imp$color4Levels,col.labels = col4Levels.imp$color4Levels,
+                             display.labels = TRUE,display.points = TRUE,text.cex = 2.5,force=2,cex=1,
+                              title = "J Map for Dimension 1 & 2")
+
+
+lines4J <- addLines4MCA(Fj, col4Var = col4Levels.imp$color4Variables, size = 1)
+
+Loadings_12 <- baseMap.j.12$zeMap+labels4MCA_12+lines4J
+
+print(Loadings_12)
+
+```
+
+
+### J Map for Dimension 2 & 3
+```{r}
+baseMap.j.23 <- createFactorMap(Fj, constraints = constraints.sym,
+                             col.points = col4Levels.imp$color4Levels,col.labels = col4Levels.imp$color4Levels,
+                             display.labels = TRUE,display.points = TRUE,text.cex = 2.5,force=2,cex=1,
+                              title = "J Map for Dimension 2 & 3",axis1 = 2,axis2=3)
+
+
+lines4J <- addLines4MCA(Fj, col4Var = col4Levels.imp$color4Variables, size = 1)
+
+Loadings_23 <- baseMap.j.23$zeMap+labels4MCA_23#+lines4J
+
+print(Loadings_23)
+
+```
+
+
+### I&J combined for Dimension 1 & 2
+```{r}
+
+print(Loadings_12+baseMap.i.12$zeMap_dots + baseMap.i.12$zeMap_text)
+```
+
+### I&J combined for Dimension 2 & 3
+```{r}
+
+print(Loadings_23+baseMap.i.23$zeMap_dots + baseMap.i.23$zeMap_text)
+```
+
+
+
+
+### Creating Base maps of Factor scores Asymmetric
+```{r}
+
+baseMap.i.a <- createFactorMap(Fi, constraints = constraints.sym,
+                             col.points = DESIGN$rows$JobLevel$color_observ,
+                             col.labels = 'darkorchid',title = "Factor scores by Job Level (Asymmetric)",display.labels = FALSE)
+#dev.new()
+print(baseMap.i.a$zeMap)
+
+
+baseMap.j.a <- createFactorMap(Fj.a, constraints = constraints.asym,
+                             color.points = 'darkorchid4',display.labels = FALSE)
+#dev.new()
+print(baseMap.j.a$zeMap)
+print(baseMap.i.a$zeMap + baseMap.j.a$zeMap_dots + baseMap.j.a$zeMap_text)
+```
+
+
+### Plotting observation for symmetric and asymmetric
+```{r}
+
+
+symMap  <- createFactorMapIJ(Fi,Fj,
+                             col.points.i = DESIGN$rows$JobLevel$color_observ,
+                             col.labels.i = DESIGN$rows$JobLevel$color_observ)
+
+asymMap  <- createFactorMapIJ(Fi,Fj.a,
+                              col.points.i = DESIGN$rows$JobLevel$color_observ,
+                              col.labels.i = DESIGN$rows$JobLevel$color_observ)
+
+labels4CA <- createxyLabels(resCA = resMCA.asym)
+
+
+
+```
+
+
+### Contribution Plot
+
+```{r}
+#_____________________________________________________________________
+# Contribution Plots ----
+# get the Contributions and make a plot.
+#_____________________________________________________________________
+# Here we look only at the (signed) contributions for the variables
+# compute teh signed contributions
+signed.ctrJ <- resMCA.sym$ExPosition.Data$cj * sign(resMCA.sym$ExPosition.Data$fj)
+
+b003.ctrJ.s.1 <- PrettyBarPlot2(signed.ctrJ[,1],
+                         threshold = 1 / NROW(signed.ctrJ),
+                         font.size = 5,
+                         color4bar = gplots::col2hex(resMCA.sym$Plotting.Data$fj.col), # we need hex code
+                         main = 'Variable Contributions (Signed): Dimension 1',
+                         ylab = 'Contributions',
+                         ylim = c(1.2*min(signed.ctrJ), 1.2*max(signed.ctrJ))
+)
+#dev.new()
+print(b003.ctrJ.s.1)
+
+
+b004.ctrJ.s.2 <- PrettyBarPlot2(signed.ctrJ[,2],
+                           threshold = 1 / NROW(signed.ctrJ),
+                           font.size = 5,
+                           color4bar = gplots::col2hex(resMCA.sym$Plotting.Data$fj.col), # we need hex code
+                           main = 'Variable Contributions (Signed): Dimension 2',
+                           ylab = 'Contributions',
+                           ylim = c(1.2*min(signed.ctrJ), 1.2*max(signed.ctrJ))
+)
+#dev.new()
+print(b004.ctrJ.s.2)
+
+```
+
+
+### Bootstrap Bars
+
+```{r}
+
+BR <- resMCA.inf$Inference.Data$fj.boots$tests$boot.ratios
+laDim = 1
+ba001.BR1 <- PrettyBarPlot2(BR[,laDim],
+                        threshold = 2,
+                        font.size = 5,
+                   color4bar = gplots::col2hex(resMCA.sym$Plotting.Data$fj.col), # we need hex code
+                   main = paste0(
+                     'Bootstrap ratio for Dimension:',laDim),
+                  ylab = 'Bootstrap ratios'
+                  #ylim = c(1.2*min(BR[,laDim]), 1.2*max(BR[,laDim]))
+)
+#dev.new()
+print(ba001.BR1)
+#
+laDim = 2
+ba002.BR2 <- PrettyBarPlot2(BR[,laDim],
+                            threshold = 2,
+                            font.size = 5,
+                            color4bar = gplots::col2hex(resMCA.sym$Plotting.Data$fj.col), # we need hex code
+                            main = paste0(
+                              'Bootstrap ratio for Dimension:',laDim),
+                ylab = 'Bootstrap ratios'
+)
+#dev.new()
+print(ba002.BR2)
+```
+**Dimension 1:**
+**-MOnthly Income_3,yr_at_comp(3,4),yr_wid_mgr(3,4) are some variable levels on +ve side of the component**
+**-MOnthly Income(1,2),yr_at_comp(1,2),yr_wid_mgr(1,2),num_comp_4 are some variable levels on -ve side of the component**
+**Dimension 2:**
+**-yr_at_comp(1,4),yr_wid_mgr(1,4) are some variable levels on +ve side of the component**
+**-Env_Sat_4,job_sat_4,education_1 are some variable levels on -ve side of the component**
+
+### Symmetric and Asymmetric Plots
+```{r}
+# draw the maps ----
+
+
+#map.IJ.sym <- symMap$baseMap + symMap$I_labels + symMap$I_points +
+#  symMap$J_labels + symMap$J_points + labels4CA
+#print(map.IJ.sym)
+
+map.IJ.sym <- symMap$baseMap + symMap$I_points +symMap$J_points + labels4CA 
+  #symMap$J_labels #+  symMap$I_labels +  
+print(map.IJ.sym)
+
+
+
+#map.IJ.asym <- asymMap$baseMap + asymMap$I_labels + 
+ # asymMap$I_points + asymMap$J_labels + 
+  #asymMap$J_points + labels4CA
+
+map.IJ.asym <- asymMap$baseMap + 
+  asymMap$I_points +  asymMap$J_points + labels4CA #+ asymMap$J_labels #+  asymMap$I_labels +
+  #
+
+
+#dev.new()
+print(map.IJ.asym)
+```
+**Symmetric plot when colored by Job Level gives kind of horseshoe shape.**
+
+
+## Inferences
+
+We now plot the contribution and bootstrap ratios
+
+### Means for Dimension 1&2 , Dimension 2&3
+
+```{r}
+#_____________________________________________________________________
+# Inferences
+
+#_____________________________________________________________________
+# Mean Map
+#  create the map for the means
+#  get the means by groups
+
+data_means <- PTCA4CATA::getMeans(Fi, new.ibm.emp.data$JobLevel)
+rownames(data_means) = c("JL5","JL4","JL3","JL2","JL1")
+# a vector of color for the means
+col4Data <- DESIGN$rows$JobLevel$color_groups
+col4Means <- unique(col4Data)
+# the map
+MapGroup12    <- PTCA4CATA::createFactorMap(data_means,
+                            # use the constraint from the main map
+                            constraints = baseMap.i.12$constraints,
+                            col.points = col4Means,
+                            cex = 7,  # size of the dot (bigger)
+                            col.labels = col4Means,axis1 = 1,axis2 = 2,
+                            text.cex = 6)
+
+
+MapGroup23    <- PTCA4CATA::createFactorMap(data_means,
+                            # use the constraint from the main map
+                            constraints = baseMap.i.23$constraints,
+                            col.points = col4Means,
+                            cex = 7,  # size of the dot (bigger)
+                            col.labels = col4Means,axis1 = 2,axis2 = 3,
+                            text.cex = 6)
+
+# The map with observations and group means
+I.withMeans12 <- FS_JL_12 +
+                         MapGroup12$zeMap_dots + MapGroup12$zeMap_text
+
+I.withMeans23 <- FS_JL_23 +
+                         MapGroup23$zeMap_dots + MapGroup23$zeMap_text  
+#dev.new()
+print(I.withMeans12)
+print(I.withMeans23)
+
+```
+
+
+### Confidence Intervals
+```{r}
+# Confidence Intervals ----
+# Bootstrap for CI:
+BootCube <- PTCA4CATA::Boot4Mean(resMCA.sym$ExPosition.Data$fi, 
+                                 design = DESIGN$rows$JobLevel$color_observ,
+                                 niter = 100,
+                                 suppressProgressBar = TRUE)
+
+GraphElli_12 <- PTCA4CATA::MakeCIEllipses(BootCube$BootCube[,1:2,],
+                            names.of.factors = c("Dimension 1","Dimension 2"),
+                            col = rownames(BootCube$BootCube[,c(1,2),1]),
+                            p.level = .95)
+
+GraphElli_23 <- PTCA4CATA::MakeCIEllipses(BootCube$BootCube[,2:3,],
+                            names.of.factors = c("Dimension 1","Dimension 2"),
+                            col = rownames(BootCube$BootCube[,c(1,2),1]),
+                            p.level = .95)
+
+I.JL.withCI_12 <-  I.withMeans12 +  GraphElli_12 
+
+print(I.JL.withCI_12)
+
+
+```
+
+**Employee with JobLevel 1 & 2 have clear seperation in the confidence Interval**  
+
+### Tolerance Intervals
+
+```{r}
+# Tolerance Intervals ----
+# use function MakeToleranceIntervals from package PTCA4CATA
+GraphTI.Hull <- PTCA4CATA::MakeToleranceIntervals(resMCA.sym$ExPosition.Data$fi,
+                            design = as.factor(DESIGN$rows$JobLevel$color_observ),
+                            # line below is needed
+                            names.of.factors =  c("Dim1","Dim2"), # needed 
+                            col = rownames(BootCube$BootCube[,c(1,2),1]),
+                            line.size = .50, 
+                            line.type = 3,
+                            alpha.ellipse = .2,
+                            alpha.line    = .4,
+                            p.level       = .75)
+
+TI.withTIHull <-I.withMeans12 + GraphTI.Hull 
+
+#dev.new()
+print(TI.withTIHull)
+
+```
+
+
+## Conclusion
+- I map showed factor score distribution along Dimension 1 when colored by Job Level  
+- J map showed few variables as significant after binning as Year(with manager, current role),age. montlhly income  
+- For dimension 2&3 we couldnt find any pattern for different variables    
+- Overall, it showed a trend that as experience increases Job Level increased  
+
+```{r eval=FALSE,include=FALSE}
+listSaved <- saveGraph2pptx(
+file2Save.pptx = '[Group2_Ajay]MCA-IBM-HR-Employee-WithAttrition.pptx', 
+title = "The MCA", 
+addGraphNames = TRUE)
+```
+
+
+
+
+
+```{r eval=FALSE, include=FALSE}
+#Trials
+new_df <- data.frame()
+
+binning <- function(X){
+   if (length(unique(new.ibm.emp.data[X])) > 5){
+     qts <- quantile(new.ibm.emp.data[X])[2:4]
+      abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+      print(val)
+    print(count)
+     col1 <- cut(new.ibm.emp.data[X],breaks=c(min(new.ibm.emp.data[X])-1,qts,max(new.ibm.emp.data[X])+1),labels=c(qts[]))
+   } else {
+    col1 <- new.ibm.emp.data[X]
+  }
+ 
+  
+  #new_df[val] <-val
+
+  corr <- cor(as.numeric(col1),new.ibm.emp.data[X],method = "spearman") #Checking for consistency
+    return(col1)
+}
+
+unique(new.ibm.emp.data[,12])
+table(new.ibm.emp.data[,12])
+qts <- quantile(new.ibm.emp.data[,12])[2:4]
+
+
+new_df1 <- sapply(new.ibm.emp.data,binning <- function(X){
+  #print(unique(X))
+   if (length(unique(X)) > 5){
+     qts <- quantile(X)[2:4]
+      #abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+      print(val)
+    print(count)
+     col1 <- cut(X,breaks=c(min(X)-1,qts,max(X)+1),labels=c(qts))
+   } else {
+    col1 <- X
+  }
+ 
+  
+  #new_df[val] <-val
+
+  corr <- cor(as.numeric(col1),X,method = "spearman") #Checking for consistency
+    return(col1)
+})
+
+for (val in colnames(new.ibm.emp.data)){
+  hist(new.ibm.emp.data[,12],breaks = 25, main="Length", xlab = "Values")
+  
+   if (length(unique(new.ibm.emp.data[,12])) > 5){
+     qts <- quantile(new.ibm.emp.data[,12])[2:4]
+      abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+      print(val)
+    print(count)
+     col1 <- cut(new.ibm.emp.data[,12],breaks=c(min(new.ibm.emp.data[,12])-1,qts,max(new.ibm.emp.data[,12])+1),labels=c(qts[]))
+   } else {
+    col1 <- new.ibm.emp.data[,count]
+  }
+ 
+  
+  #new_df[val] <-val
+
+  corr <- cor(as.numeric(col1),new.ibm.emp.data[,count],method = "spearman") #Checking for consistency
+#Corr :  0.9680162
+  print(corr)
+  count = count +1
+}
+
+```
+
+
+```{r eval=FALSE, include=FALSE}
+data(words)
+expdata <- words$data
+expdata
+expdata[,1]
+
+hist(expdata[,1],breaks = 25, main="Length", xlab = "Values")
+abline(v = c(4,6), col = "red", lwd =2) # plot the cutoff line
+
+length_recode <- cut(expdata[,1],breaks=c(min(expdata[,1])-1,4,6,max(expdata[,1])+1),labels=c(1,2,3))
+length_recode #(Insead of numbers it just has levels)
+
+#Checking the coorelation between new and old
+cor(as.numeric(length_recode),expdata[,1],method = "spearman")
+table(length_recode) #creating contingency table (count of each variable)
+
+par(mfrow=c(1,2)) # change the dimension for my plots to 1 row and 2 columns
+hist(expdata[,1],breaks = 10, main="Length", xlab = "Values") # plot histogram
+abline(v = c(4,6), col = "red", lwd =2) # plot the cutoff line
+hist(expdata[,2], main="definition", xlab = "Values") # plot histogram
+# Because this column has a relatively normal distribution, I will cut it at the quantiles
+qts <- quantile(expdata[,2])[2:4]
+abline(v = qts, col = "red", lwd =2) # plot the cutoff line
+
+
+definition_recode <- cut(expdata[,2],breaks=c(min(expdata[,2])-1,qts,max(expdata[,2])+1),labels=c(1,2,3,4))
+
+cor(as.numeric(definition_recode),expdata[,2],method = "spearman") #Checking for consistency
+
+table(definition_recode)
+
+# use cbind to bind the columns
+NewWordsData <- cbind(length_recode,definition_recode)
+
+rownames(NewWordsData) <- rownames(expdata)
+
+mca.res <- epMCA(NewWordsData, make_data_nominal = TRUE, graphs = FALSE)
+```
+

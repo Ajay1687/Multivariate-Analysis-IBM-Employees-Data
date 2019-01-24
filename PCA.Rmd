@@ -1,0 +1,562 @@
+
+---
+title: "PCA on IBM Data"
+#author: "Ajay Attuchirayil Krishnankutty"
+#date: "Spetember 22, 2018"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r PCA_setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+
+devtools::install_github('HerveAbdi/PTCA4CATA')
+#devtools::install_github('HerveAbdi/DistatisR')
+devtools::install_github('HerveAbdi/data4PCCAR')
+
+library(ExPosition)
+library(InPosition)
+library(xlsx)
+library(corrplot)
+
+library(dplyr)
+library(ggplot2)
+library(PTCA4CATA)
+library(data4PCCAR)
+library(corrplot)
+```
+
+# Principal Component Analysis
+
+Principal Component Analysis(PCA) is used to analyze the continuous variables in a given dataset, which helps us in interpreting which all variables contribute more to the flow of data and in the end cluster the data in various groups.
+
+Consider a 2D dataset(has 2 variables/columns) that has all its observations(rows) plotted on the X-Y axis.
+
+We do a little preprocessing before we begin, i.e. we center and scale the data.
+Centering: Refers to subtracting mean of each column from each of its points.
+Scaling: Normalization
+
+Now we plot the new point on the XY axis.
+
+We try to find a line among all these points such that **minimizes** sum of square of perpendicular distance each point from that line.
+
+**OR**
+Try to find a line that **maximizes** the distance of projection of each point onto this line from the origin.
+
+This line that we get is the **Principal Component 1(PC1)**. It will have the maximum inertia(variance), or it kind of pulls the majority of the data.
+
+Next, **Principal Component 2(PC2)** is a line orthogonal to PC1(*We take the orthogonal line as next component in order to reduce any effect from the PC1, so we will just get the effect of PC2 on the observations*)
+
+**Factor Score**: Instead of distance from XY axis, we take the distance w.r.t PC1 and PC2 thereby giving Factor scores of the observations.
+                  PCA gives one map of factor scores, from which we can make out the observations that have more effect on the components.
+                  For intrepretation in this graph we consider the distances between factor score.
+
+**Loadings**: These corresspond to the variables/columns being plotted on the PC axis.
+              Another PCA map gives loadings of variables.
+              For intrepretation we consider the angle between various variables.
+
+Based on boh these maps we find the important variables and factors that drive the overall data, adn divide it into various groups.
+
+
+
+## Data set: IBM-HR-Emplyee-WithAttrition
+
+The dataset given is regarding IBM employees, available to the HR section of the company to take decisions regarding attrition.
+
+It consists of data of 237 employees (rows), with 32 variables(columns) defining each employee based on position,education,department etc.
+
+
+```{r PCA_data_set, include=FALSE}
+ibm.emp.data <- read.xlsx("IBM-HR-Emplyee-WithAttrition.xlsx", sheetName = "Sheet1",header=TRUE)
+rownames(ibm.emp.data) <- ibm.emp.data$Subj
+ibm.emp.data <- ibm.emp.data[-c(1)]
+cols <- c('Age','Gender','JobRole','MonthlyIncome','TotalWorkingYears','JobSatisfaction')
+head(ibm.emp.data[cols])
+
+
+```
+
+Of the 32 variables, we have following:
+*Quantitative Variables* :Subj, Age, Monthly Income, DailyRate, HourlyRate, MonthlyRate,PercentSalaryHike etc
+*Nominal Variables*: BusinessTravel, Department, EducationField,Attrition,JobRole
+*Ordinal Variables*: PerformanceRating, JobLevel, JobInvolvement
+
+### Corelation Plot
+```{r echo=FALSE}
+ibm.emp.data$Education <- factor(ibm.emp.data$Education)
+#sapply(ibm.emp.data, class)
+new.ibm.emp.data <- ibm.emp.data[sapply(ibm.emp.data, function(x) !is.factor(x))]
+
+cor.res <- cor(new.ibm.emp.data)
+corrplot(cor.res,method = c("ellipse"),type = 'lower')
+```
+
+From the correlation plot, we see that year related variables have significant positive corelation amongst themselves.
+Apart from the above variabels we have +ve correlation between Age-Monthly Income, Job Level,Num of COmpanies Worked.
+Also we see signinificant relation between Job Level-Monthly Income.
+
+
+### Heat Map
+```{r}
+dev.new()
+color4Var <- prettyGraphs::prettyGraphsColorSelection(ncol(new.ibm.emp.data))
+
+corrMatBurt.list <- phi2Mat4BurtTable(new.ibm.emp.data)
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+corr4PCA.r <- corrplot::corrplot(
+as.matrix(corrMatBurt.list$phi2.mat),
+method="color", col=col(200),
+type="upper",
+addCoef.col = "black", # Add coefficient of correlation
+tl.col=color4Var,
+tl.srt = 45, #Text label color and rotation
+number.cex = .5,
+diag = TRUE # needed to have the color of variables correct
+)
+
+```
+After the removal of qualitative data, the heat map shows,strong +ve correlation between Monthly Rate and all other variables.
+ALso we see similar trend with Monthly Income & Hourly Rate.
+Perfect COrrelation between Performance Rating and Percent Salary Hike.
+
+
+
+## Create DESIGN variables.
+
+### 1st Design Variable : Job Level
+
+We choose Job Level as 1st design variable.
+Job Level is related to the position of employee in the company.
+In this data we have 5 levels for Job Level (1,2,3,4,5)
+With 1 being the position wise seniormost employess and 5 accordingly loewr ranked ones.
+```{r PCA_DESIGN, include = FALSE}
+#Create an empty list, called DESIGN
+DESIGN <- list()
+
+#We take all the unique values possible in the specified column if the dataframe
+DESIGN$rows$JobLevel$labels <- unique(ibm.emp.data$JobLevel)
+
+
+#Storing the categorical values in a vector
+DESIGN$rows$JobLevel$vec <- ibm.emp.data$JobLevel
+
+
+#Convert the vector to a matrix
+DESIGN$rows$JobLevel$mat <- makeNominalData(as.matrix(DESIGN$rows$JobLevel$vec))
+
+```
+
+
+```{r PCA_colors_2, include= FALSE}
+
+#As our group has 5 levels we specify same number of colors
+
+DESIGN$rows$JobLevel$color_groups <- c("red", "green", "magenta", "blue","yellow")
+
+#First, copy the group names
+DESIGN$rows$JobLevel$color_observ <- as.matrix(DESIGN$rows$JobLevel$vec)
+
+#Then, for each group, replace the group name with the group's color
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="1")]  <- DESIGN$rows$JobLevel$color_groups[1]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="2")]  <- DESIGN$rows$JobLevel$color_groups[2]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="3")]  <- DESIGN$rows$JobLevel$color_groups[3]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="4")]  <- DESIGN$rows$JobLevel$color_groups[4]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="5")]  <- DESIGN$rows$JobLevel$color_groups[5]
+
+```
+
+
+### 2nd Design Variable : Performance Rating
+We choose Performance Rating as 2nd design variable.
+Performance Rating is related to the year end evaluation of employees.
+In this data we have 2 levels for Performance Rating (3,4)
+With 4 being the best and 3 the next best.
+
+```{r PCA_DESIGN_1,include=FALSE}
+#Repeating the same process as above for Performance Rating
+DESIGN_1 <- list()
+
+#We take all the unique values possible in the specified column if the dataframe
+DESIGN_1$rows$PerfRating$labels <- unique(ibm.emp.data$PerformanceRating) 
+
+#Storing the categorical values in a vector
+DESIGN_1$rows$PerfRating$vec <- ibm.emp.data$PerformanceRating
+
+#Convert the vector to a matrix
+DESIGN_1$rows$PerfRating$mat <- makeNominalData(as.matrix(DESIGN_1$rows$PerfRating$vec))
+```
+
+
+
+```{r PCA_colors_2_pr,include=FALSE}
+
+#As our group has 2 levels we specify same number of colors
+
+DESIGN_1$rows$PerfRating$color_groups <- c("green", "blue")
+
+#First, copy the group names
+DESIGN_1$rows$PerfRating$color_observ <- as.matrix(DESIGN_1$rows$PerfRating$vec) 
+
+#Then, for each group, replace the group name with the group's color
+DESIGN_1$rows$PerfRating$color_observ[which(DESIGN_1$rows$PerfRating$vec=="3")]  <- DESIGN_1$rows$PerfRating$color_groups[1]
+DESIGN_1$rows$PerfRating$color_observ[which(DESIGN_1$rows$PerfRating$vec=="4")]  <- DESIGN_1$rows$PerfRating$color_groups[2]
+```
+
+
+## Running the PCA
+
+We run the epPCA and epPCA.inference model by passing the data containing only quantitative variables and also the design variables.
+
+```{r PCA_analyze, echo = TRUE}
+new.ibm.emp.data1 <- subset(new.ibm.emp.data, select = -c(JobLevel))
+new.ibm.emp.data2 <- subset(new.ibm.emp.data, select = -c(PerformanceRating))
+
+res_pca_d1 <- epPCA(new.ibm.emp.data1, center = TRUE,DESIGN = DESIGN$rows$JobLevel$color_observ, scale = TRUE, graphs = TRUE)
+
+res_pca_d2 <- epPCA(new.ibm.emp.data2, center = TRUE,DESIGN_1$rows$PerfRating$color_observ, scale = TRUE, graphs = TRUE)
+
+# do inference PCA
+
+res_pca.inf_d1 <- epPCA.inference.battery(new.ibm.emp.data1,scale = 'ss1', DESIGN = DESIGN$rows$JobLevel$color_observ, make_design_nominal = TRUE)
+
+res_pca.inf_d2 <- epPCA.inference.battery(new.ibm.emp.data2,scale = 'ss1', DESIGN = DESIGN_1$rows$PerfRating$color_observ, make_design_nominal = TRUE)
+```
+
+
+
+### Scree Plot
+We first do a scree plot with inference, which shows how many components are required to define the data, and which all out of these are the significant ones.  
+
+- We find that 3 component come up as significant during permutation test.
+
+```{r PCA_scree_plot}
+#Get the Eigen Values list
+EigenValues <- res_pca_d1$ExPosition.Data$eigs
+
+
+PlotScree(ev = EigenValues, 
+       p.ev =  res_pca.inf_d1$Inference.Data$components$p.vals,
+       title = "Scree Plot with Permutation Test - PCA",
+       plotKaiser = TRUE
+          )
+#dev.new()
+a001a.screePlot <- recordPlot()
+#ev.new()
+print(a001a.screePlot)
+
+```
+
+
+```{r include=FALSE}
+Fi <- res_pca_d1$ExPosition.Data$fi
+Fi.1 <- res_pca_d2$ExPosition.Data$fi
+Fj <- res_pca_d1$ExPosition.Data$fj
+Fj.1 <- res_pca_d2$ExPosition.Data$fj
+Cj <- res_pca_d1$ExPosition.Data$cj
+Cj.1 <- res_pca_d2$ExPosition.Data$cj
+Eigs <- res_pca_d1$ExPosition.Data$eigs
+tau <- res_pca_d1$ExPosition.Data$t
+
+color4Var <- prettyGraphs::prettyGraphsColorSelection(ncol(new.ibm.emp.data1))
+col4Levels <- data4PCCAR::coloringLevels(rownames(Fj), color4Var)
+col4Labels <- col4Levels$color4Levels
+
+varCtr <- data4PCCAR::ctr4Variables(Cj)
+
+
+
+absCtrVar <- as.matrix(varCtr) %*% diag(Eigs)
+varCtr12 <- (absCtrVar[,1] + absCtrVar[,2]) /(Eigs[1] + Eigs[2])
+importantVar <- (varCtr12 >= 1 / length(varCtr12))
+col4ImportantVar <- color4Var
+col4NS <- 'gray90'
+col4ImportantVar[!importantVar] <- col4NS
+#Color for importance in  variables
+col4Levels.imp <- data4PCCAR::coloringLevels(rownames(Fj),col4ImportantVar)
+
+
+```
+
+
+### Factor scores Based on Job Level
+Factor scores are the coordinates of the 237 employees on the components. The distances between them show which employees are most similar. Factor scores (states) can be color-coded to help interpret the components.
+
+
+#### Between Component 1 & 2:
+```{r factor scores JOb Level 12,echo=FALSE}
+
+#Plotting Factor Scores for Dim 1 & 2
+baseMap.jl.12 <- createFactorMap(Fi, col.points = DESIGN$rows$JobLevel$color_observ,
+                             col.labels = 'darkorchid',title = "Factor scores by Job Level",display.labels = FALSE,
+                             display.points = TRUE,axis1 = 1,axis2 = 2)  
+
+#Creating labels for Dim 1 & 2
+x_y_labels_1_2 <- createxyLabels.gen(1,2, lambda = Eigs,tau = tau)
+
+#Calculating the means for Dim 1 & 2
+data_means_JL <- PTCA4CATA::getMeans(Fi, ibm.emp.data$JobLevel)
+rownames(data_means_JL) = c("JL5","JL4","JL3","JL2","JL1")
+
+
+#Mapping the means
+MapGroup_jl_12    <- PTCA4CATA::createFactorMap(data_means_JL,
+                            # use the constraint from the main map
+                            constraints = baseMap.jl.12$constraints,
+                            col.points = DESIGN$rows$JobLevel$color_groups,
+                            cex = 7,  # size of the dot (bigger)
+                            display.labels = TRUE,axis1 = 1,axis2 = 2,
+                            col.labels = DESIGN$rows$JobLevel$color_groups,
+                            text.cex = 6)
+
+#Adding all the plots
+jl_1_2 <- baseMap.jl.12$zeMap + x_y_labels_1_2+MapGroup_jl_12$zeMap_dots + MapGroup_jl_12$zeMap_text
+
+#dev.new()
+
+print(jl_1_2)
+
+
+```
+
+#### Confidence Intervals
+```{r}
+# Confidence Intervals ----
+# Bootstrap for CI:
+BootCube <- PTCA4CATA::Boot4Mean(res_pca_d1$ExPosition.Data$fi, 
+                                 design = DESIGN$rows$JobLevel$color_observ,
+                                 niter = 100,
+                                 suppressProgressBar = TRUE)
+
+
+GraphElli <- PTCA4CATA::MakeCIEllipses(BootCube$BootCube[,1:2,],
+                            names.of.factors = c("Dimension 1","Dimension 2"),
+                            col = rownames(BootCube$BootCube[,c(1,2),1]),
+                            p.level = .95
+)
+
+JL.withCI <-  jl_1_2 +  GraphElli
+
+#dev.new()
+print(JL.withCI)
+
+```
+
+
+#### Between Component 2 & 3:
+```{r factor scores JOb Level 23,echo=FALSE}
+#Plotting Factor Scores for Dim 1 & 2
+baseMap.jl.23 <- createFactorMap(Fi, col.points = DESIGN$rows$JobLevel$color_observ,
+                             col.labels = 'darkorchid',title = "Factor scores by Job Level",display.labels = FALSE,
+                             display.points = TRUE,axis1 = 2,axis2 = 3)  
+
+#Creating labels for Dim 2 & 3
+x_y_labels_2_3 <- createxyLabels.gen(2,3, lambda = Eigs,tau = tau)
+
+#Mapping the means
+MapGroup_jl_23    <- PTCA4CATA::createFactorMap(data_means_JL,
+                            # use the constraint from the main map
+                            constraints = baseMap.jl.23$constraints,
+                            col.points = DESIGN$rows$JobLevel$color_groups,
+                            cex = 7,  # size of the dot (bigger)
+                            display.labels = TRUE,axis1 = 2,axis2 = 3,
+                            col.labels = DESIGN$rows$JobLevel$color_groups,
+                            text.cex = 6)
+
+#Adding all the plots
+jl_2_3 <- baseMap.jl.23$zeMap + x_y_labels_2_3+MapGroup_jl_23$zeMap_dots + MapGroup_jl_23$zeMap_text
+#dev.new()
+print(jl_2_3)
+```
+
+
+
+### Factor scores Based on Performance Rating
+We plot and color based on Performacne Rating
+
+#### Between Component 1 & 2:
+```{r}
+
+#Plotting Factor Scores for Dim 1 & 2
+baseMap.pr.12 <- createFactorMap(Fi.1, col.points = DESIGN_1$rows$PerfRating$color_observ,
+                             col.labels = 'darkorchid',title = "Factor scores by Performance Rating",display.labels = FALSE,
+                             display.points = TRUE,axis1 = 1,axis2 = 2)  
+
+
+#Calculating the means for Dim 1 & 2
+data_means_PR <- PTCA4CATA::getMeans(Fi.1, ibm.emp.data$PerformanceRating)
+rownames(data_means_PR) = c("PR3","PR4")
+
+
+#Mapping the means
+MapGroup_pr_12    <- PTCA4CATA::createFactorMap(data_means_PR,
+                            # use the constraint from the main map
+                            constraints = baseMap.pr.12$constraints,
+                            col.points = DESIGN_1$rows$PerfRating$color_groups,
+                            cex = 7,  # size of the dot (bigger)
+                            display.labels = TRUE,axis1 = 1,axis2 = 2,
+                            col.labels = DESIGN_1$rows$PerfRating$color_groups,
+                            text.cex = 6)
+
+#Adding all the plots
+pr_1_2 <- baseMap.pr.12$zeMap + x_y_labels_1_2+MapGroup_pr_12$zeMap_dots + MapGroup_pr_12$zeMap_text
+
+#dev.new()
+
+print(pr_1_2)
+
+
+```
+
+#### Confidence Intervals
+```{r}
+# Confidence Intervals ----
+# Bootstrap for CI:
+BootCube <- PTCA4CATA::Boot4Mean(res_pca_d2$ExPosition.Data$fi, 
+                                 design = DESIGN_1$rows$PerfRating$color_observ,
+                                 niter = 100,
+                                 suppressProgressBar = TRUE)
+
+
+GraphElli <- PTCA4CATA::MakeCIEllipses(BootCube$BootCube[,1:2,],
+                            names.of.factors = c("Dimension 1","Dimension 2"),
+                            col = rownames(BootCube$BootCube[,c(1,2),1]),
+                            p.level = .95
+)
+
+PR.withCI <-  pr_1_2 +  GraphElli
+
+#dev.new()
+print(PR.withCI)
+
+```
+
+#### Between Component 2 & 3:
+```{r}
+#Plotting Factor Scores for Dim 1 & 2
+baseMap.pr.23 <- createFactorMap(Fi.1, col.points = DESIGN_1$rows$PerfRating$color_observ,
+                             col.labels = 'darkorchid',title = "Factor scores by Performance Rating",display.labels = FALSE,
+                             display.points = TRUE,axis1 = 2,axis2 = 3)  
+
+#Mapping the means
+MapGroup_pr_23    <- PTCA4CATA::createFactorMap(data_means_PR,
+                            # use the constraint from the main map
+                            constraints = baseMap.pr.23$constraints,
+                            col.points = DESIGN_1$rows$PerfRating$color_groups,
+                            cex = 7,  # size of the dot (bigger)
+                            display.labels = TRUE,axis1 = 2,axis2 = 3,
+                            col.labels = DESIGN_1$rows$PerfRating$color_groups,
+                            text.cex = 6)
+
+#Adding all the plots
+pr_2_3 <- baseMap.pr.23$zeMap +MapGroup_pr_23$zeMap_dots + MapGroup_pr_23$zeMap_text#+x_y_labels_2_3
+
+#dev.new()
+print(pr_2_3)
+```
+
+
+```{r}
+color4Var <- prettyGraphs::prettyGraphsColorSelection(ncol(new.ibm.emp.data))
+col4Levels <- data4PCCAR::coloringLevels(rownames(Fj), color4Var)
+col4Labels <- col4Levels$color4Levels
+
+varCtr <- data4PCCAR::ctr4Variables(Cj)
+#rownames(color4Var) <- rownames(varCtr)
+```
+
+
+### Loadings
+#### Loadings for Component 1 vs Component 2:
+
+```{r}
+col4Levels.imp <- data4PCCAR::coloringLevels(rownames(Fj),col4ImportantVar)
+
+baseMap.j12 <- createFactorMap(Fj, #constraints = constraints.sym,
+                             col.points = col4Levels.imp$color4Levels,col.labels = col4Levels.imp$color4Levels,
+                             display.labels = TRUE,display.points = TRUE,text.cex = 3,force=2,cex=1,
+                              title = "J Map for Dimension 1 & 2",axis1=1,axis2=2)
+dev.new()
+print(baseMap.j12$zeMap + x_y_labels_1_2)
+```
+
+
+#### Loadings for Component 2 vs Component 3
+```{r}
+baseMap.j23 <- createFactorMap(Fj, #constraints = constraints.sym,
+                             col.points = col4Levels.imp$color4Levels,col.labels = col4Levels.imp$color4Levels,
+                             display.labels = TRUE,display.points = TRUE,text.cex = 3,force=2,cex=1,
+                              title = "J Map for Dimension 2 & 3",axis1=2,axis2=3)
+dev.new()
+print(baseMap.j23$zeMap + x_y_labels_1_2)
+```
+
+
+
+## Inferences
+
+### Bootstrap Bars
+
+We are trying to find out the significance of the different variables used in the analysis, by using bootstrap method to generate many samples from the same dataset.  
+
+As we run the inference bootstraping takes place within and we get the bootstrap ratios for each variables.
+The plot will show bootstrap ratio of each variables for each component.  
+
+The ones greater than 2 will be shown as significant and the if the variable pops out in the top half it coressponds it is significant towards positive side of the component and otherwise.  
+
+```{r}
+
+BR <- res_pca.inf_d1$Inference.Data$fj.boots$tests$boot.ratios
+laDim = 1
+ba001.BR1 <- PrettyBarPlot2(BR[,laDim],
+                        threshold = 2,
+                        font.size = 5,
+                   #color4bar = gplots::col2hex(res_pca.inf_d1$Plotting.Data$fj.col), # we need hex code
+                   main = paste0(
+                     'Bootstrap ratio for Dimension:',laDim),
+                  ylab = 'Bootstrap ratios',horizontal = FALSE
+                  #ylim = c(1.2*min(BR[,laDim]), 1.2*max(BR[,laDim]))
+)
+dev.new()
+print(ba001.BR1)
+#
+laDim = 2
+ba002.BR2 <- PrettyBarPlot2(BR[,laDim],
+                            threshold = 2,
+                            font.size = 5,
+                            #color4bar = gplots::col2hex(res_pca.inf_d1$Plotting.Data$fj.col), # we need hex code
+                            main = paste0(
+                              'Bootstrap ratio for Dimension:',laDim),
+                ylab = 'Bootstrap ratios',horizontal = FALSE
+)
+#dev.new()
+print(ba002.BR2)
+```
+
+For PC1 :  
+- Age,MonthlyIncome,Job Level, NumofComapniesWorked,TotalWorkingYears and other year realted variables are significant in     -ve   half of component.  
+- Performance Rating and Percent Salary Hike are on +ve side of the component  
+For PC2 :  
+- DistFrmHome,PerformanceRating,PercentSalaryHike,YearsAtCompany,YearsinCurrentRole,YearsWithCurrMangr are significant in     -ve half of component  
+- StockOptionLevel, NumofCompaniesWorked,Job & Relationship Satisfaction are on +ve side of the component.  
+
+
+
+
+
+
+##  Conclusions
+- Factor score when plotted between PC1 and PC2,colored by Job Level showed distribution along the PC1  
+- Factor score when plotted between PC2 and PC3,colored by Job Level didnt show any distirbution  
+
+- Factor score when plotted between PC1 and PC2,colored by Performance Rating, did not show any distribution  
+- Factor score when plotted between PC2 and PC3,colored by Performance Rating, did not show any distribution  
+
+- Loading for PC1 and PC2, Percent Salary Hike & Performance Rating were inversely correlated to NUm of Companies worked &    Relationship Satisfaction . Also Year related variables are orthogonal to above 2 groups.  
+
+- Loading for PC2 and PC3, Num of companies worked & Age were inversely correlated to Environment Satisfaction & Year related variables. Also in this case Performance rating and percent salary hike are orthogonal to above 2 groups.
+
+

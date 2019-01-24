@@ -1,0 +1,643 @@
+---
+title: "PLS-C"
+#author: "Ajay Attuchirayil Krishnankutty"
+#date: "10/26/2018"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+graphics.off()
+
+
+library(ExPosition)
+library(InPosition)
+library(xlsx)
+library(corrplot)
+
+library(dplyr)
+library(ggplot2)
+library(PTCA4CATA)
+library(data4PCCAR)
+library(corrplot)
+#install.packages('TExPosition')
+library(TExPosition)
+library(scales)
+
+file4PLSCfunctions <- 'inferences4PLSC.R'
+# Source the function file:
+source(file4PLSCfunctions)
+
+```
+
+# PLSC (Partial Least Square Correlation)
+PLSC is used when we are trying to find information that is shared between two tables.
+We have two latent variables after the analysis, for each of the tables involved.
+
+- Latent Variables : Variables obtained as linear combination of original variables.
+- Saliences : Each variables are called saliences and contribute according to their weights towards respective latent       variables.
+
+
+
+## Data set: IBM-HR-Emplyee-WithAttrition
+
+The dataset given is regarding IBM employees, available to the HR section of the company to take decisions regarding attrition.
+
+It consists of data of 237 employees (rows), with 32 variables(columns) defining each employee based on position,education,department etc.
+
+
+```{r data_set,echo=FALSE}
+# Dataset ----
+ibm.emp.data <- read.xlsx("IBM-HR-Emplyee-WithAttrition.xlsx", sheetName = "Sheet1",header=TRUE)
+rownames(ibm.emp.data) <- ibm.emp.data$Subj
+ibm.emp.data <- ibm.emp.data[-c(1)]
+cols <- c('Age','Gender','Education','MonthlyIncome','TotalWorkingYears','JobSatisfaction')
+head(ibm.emp.data[cols])
+
+```
+
+### Splitting the data into 3 tables, 2 for the correaltion operation, 3rd for the deisgn
+```{r}
+
+ibm.year <- ibm.emp.data[10:13]
+ibm.income <- ibm.emp.data[20:28]
+ibm.income <- ibm.income[-c(5)]
+colnames(ibm.income)
+colnames(ibm.year)
+ibm.design <- ibm.emp.data[,18]
+raw.data <- ibm.emp.data[-c(10:13,20:28)]
+
+```
+
+### Take smal sample out of the tables
+```{r}
+
+year <- ibm.year#[1:nN,]
+income <- ibm.income#[1:nN,]
+sample.design <- ibm.design#[1:nN]
+
+```
+
+### Correlation plot amongst the sample
+```{r}
+## heatmap
+corrplot::corrplot(cor(year,income))
+```
+
+
+### Creating DESIGN variables.
+
+#### 1st Design Variable : Job Level
+
+```{r DESIGN,echo=FALSE}
+#Create an empty list, called DESIGN
+DESIGN <- list()
+#We take all the unique values possible in the specified column if the dataframe
+DESIGN$rows$JobLevel$labels <- unique(ibm.emp.data$JobLevel)
+#Storing the categorical values in a vector
+DESIGN$rows$JobLevel$vec <- ibm.emp.data$JobLevel
+#Convert the vector to a matrix
+DESIGN$rows$JobLevel$mat <- makeNominalData(as.matrix(DESIGN$rows$JobLevel$vec))
+
+```
+
+
+
+```{r colors_2,echo=FALSE}
+
+#As our group has 5 levels we specify same number of colors
+DESIGN$rows$JobLevel$color_groups <- c("red", "green", "magenta", "blue","yellow")
+#plot(c(1:5), pch=15, cex=4, col=DESIGN$rows$JobLevel$color_groups) 
+
+#First, copy the group names
+DESIGN$rows$JobLevel$color_observ <- as.matrix(DESIGN$rows$JobLevel$vec)
+
+#Then, for each group, replace the group name with the group's color
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="1")]  <- DESIGN$rows$JobLevel$color_groups[1]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="2")]  <- DESIGN$rows$JobLevel$color_groups[2]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="3")]  <- DESIGN$rows$JobLevel$color_groups[3]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="4")]  <- DESIGN$rows$JobLevel$color_groups[4]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="5")]  <- DESIGN$rows$JobLevel$color_groups[5]
+
+```
+
+
+
+
+## Running PLSC
+```{r}
+resPLSC <- tepPLS(year,income,DESIGN = factor(sample.design),graphs = FALSE)
+
+#resPCA.inf <- epPCA.inference.battery(year,income,DESIGN = sample.design,graphs = FALSE)
+
+Fi   <- resPLSC$TExPosition.Data$fi
+Fj   <- resPLSC$TExPosition.Data$fj
+constraints.factor <- minmaxHelper(mat1 = Fi, mat2  = Fj)
+
+Eigs <- resPLSC$TExPosition.Data$eigs
+tau <- resPLSC$TExPosition.Data$t
+
+Cj <- resPLSC$TExPosition.Data$cj
+
+label2PLSC <- createxyLabels.gen(x_axis = 1, y_axis = 2,
+              lambda = Eigs,tau =tau)
+
+Lx <- resPLSC$TExPosition.Data$lx 
+Ly <- resPLSC$TExPosition.Data$ly
+constraints.latent <- minmaxHelper(mat1 = Lx, mat2  = Ly)
+```
+
+### Permutation Test
+```{r include=FALSE}
+#--------------------------------------------------------------------
+# First: Go for a permutation test
+#
+resPerm4PLSC <- perm4PLSC(year, # First Data matrix 
+                          income, # Second Data matrix
+                          nIter = 1000 # How mny iterations
+                          )
+# to see what results we have
+print(resPerm4PLSC)
+
+```
+
+
+
+
+### Scree Plot of Eigen values 
+```{r}
+# Eigenv
+EigVal <- resPLSC$TExPosition.Data$eigs 
+# How many eigen-value do we have here
+nL <- min(ncol(year),ncol(income))
+
+PlotScree(ev = EigVal, 
+       p.ev = resPerm4PLSC$pEigenvalues,
+       title = "Scree Plot with Permutation Test",
+       plotKaiser = TRUE
+          )
+a001a.screePlot <- recordPlot()
+
+```
+
+
+### Salience - Fi
+```{r}
+salience.i <- createFactorMap(Fi, constraints = constraints.factor,
+                             col.points = resPLSC$Plotting.Data$fi.col ,
+                             col.labels = 'darkorchid',title = "Saliences - Fi",display.labels = TRUE)  
+
+#dev.new()
+#hist(Fi)
+print(salience.i$zeMap  + label2PLSC)
+```
+
+
+
+### Salience - Fj
+```{r}
+salience.j <- createFactorMap(Fj, constraints = constraints.factor,
+                             col.points = resPLSC$Plotting.Data$fj.col ,
+                             col.labels = 'darkorchid',title = "Saliences - Fj",display.labels = TRUE)  
+
+#dev.new()
+
+print(salience.j$zeMap  + label2PLSC)
+
+```
+
+
+---- Design Variable : Job Level
+**We will plot Saliences and Factor scores and bootstrap ratios side by side, to show the effect on one table's variable based on the pattern in the second table**
+
+### LX1 vs Ly1
+```{r}
+Lx1 <- resPLSC$TExPosition.Data$lx[,1]
+
+Ly1 <- resPLSC$TExPosition.Data$ly[,1]
+
+df <- cbind(Lx1,Ly1)
+
+
+baseMap.i <- createFactorMap(df,# constraints = constraints.sym,
+                             col.points = DESIGN$rows$JobLevel$color_observ,
+                             col.labels = 'darkorchid',title = "Lx1 & Ly1 by Job Level",display.labels = FALSE)  
+
+print(baseMap.i$zeMap_background +baseMap.i$zeMap_dots + label2PLSC)
+
+
+```
+
+## Inferences
+
+### Means between Lx1 & Ly1
+
+```{r}
+
+
+col4data0 <- resPLSC$Plotting.Data$fii.col
+col4Means0 <- unique(col4data0)
+
+
+data_means <- PTCA4CATA::getMeans(df,ibm.emp.data$JobLevel)
+# a vector of color for the means
+rownames(data_means) = c("JL5","JL4","JL3","JL2","JL1")
+
+
+MapGroup    <- PTCA4CATA::createFactorMap(data_means,
+                            # use the constraint from the main map
+                            #constraints = baseMap.i$constraints,
+                            col.points = DESIGN$rows$JobLevel$color_groups,
+                            cex = 7,  # size of the dot (bigger)
+                            display.labels = TRUE,
+                            col.labels = DESIGN$rows$JobLevel$color_groups,
+                            text.cex = 6)
+
+
+# The map with observations and group means
+a003.Map.I.withMeans <- baseMap.i$zeMap +MapGroup$zeMap_dots + MapGroup$zeMap_text
+#a003.Map.I.withMeans <- baseMap.i$zeMap +MapGroup$zeMap_dots + MapGroup$zeMap_text
+                         
+#dev.new()
+print(a003.Map.I.withMeans)
+```
+
+
+```{r include=FALSE}
+BootCube <- PTCA4CATA::Boot4Mean(df, 
+                                 design = ibm.emp.data$JobLevel,
+                                 niter = 100,
+                                 suppressProgressBar = TRUE)
+```
+
+
+### Confidence Intervals between Lx1 & Ly1
+
+```{r eval=FALSE,include=FALSE}
+# Confidence Intervals ----
+# Bootstrap for CI:
+
+
+GraphElli <- PTCA4CATA::MakeCIEllipses(BootCube$BootCube[,1:2,],
+                            names.of.factors = c("Dimension 1","Dimension 2"),
+                            col = rownames(BootCube$BootCube[,c(1,2),1]),
+                            p.level = .95
+)
+
+
+a004.Map.I.withCI <- baseMap.i$zeMap + MapGroup$zeMap_text +  GraphElli
+
+
+dev.new()
+print(a004.Map.I.withCI)
+
+```
+
+
+### Tolerance Intervals
+
+```{r}
+# Tolerance Intervals ----
+
+GraphTI.Hull <- PTCA4CATA::MakeToleranceIntervals(df,
+                            design = ibm.emp.data$JobLevel,
+                            # line below is needed
+                            names.of.factors =  c("Dim1","Dim2"), # needed 
+                            #col = rownames(BootCube$BootCube[,c(1,2),1]),
+                            col = DESIGN$rows$JobLevel$color_groups,
+                            line.size = .50, 
+                            line.type = 3,
+                            alpha.ellipse = .2,
+                            alpha.line    = .4,
+                            p.level       = .75)
+
+
+a005.Map.I.withTIHull <-baseMap.i$zeMap  +
+                            GraphTI.Hull + MapGroup$zeMap_dots +
+                           MapGroup$zeMap_text + MapGroup$zeMap_dots
+
+
+#dev.new()
+print(a005.Map.I.withTIHull)
+
+```
+
+
+### Lx2 vs Ly2
+
+```{r}
+Lx2 <- resPLSC$TExPosition.Data$lx[,2]
+Ly2 <- resPLSC$TExPosition.Data$lx[,2]
+df1 <- as.data.frame(cbind(Lx2,Ly2))
+#ggplot(NULL, aes(x=Lx2,y=Ly2)) + geom_point(aes(colour = ibm.emp.data$JobLevel))
+
+
+baseMap1 <- createFactorMap(df1,# constraints = constraints.sym,
+                             col.points = DESIGN$rows$JobLevel$color_observ,
+                             col.labels = 'darkorchid',title = "Lx2 & Ly2 by Job Level",display.labels = FALSE)  
+
+
+print(baseMap1$zeMap)
+
+
+```
+
+
+
+### Means between Lx2 & Ly2
+
+```{r}
+#_____________________________________________________________________
+# Inferences
+
+#_____________________________________________________________________
+# Mean Map
+#  create the map for the means
+#  get the means by groups
+
+data_means <- PTCA4CATA::getMeans(df1,ibm.emp.data$JobLevel)
+rownames(data_means) =  c("JL5","JL4","JL3","JL2","JL1")
+# a vector of color for the means
+col4Data <- DESIGN$rows$JobLevel$color_groups
+#col4Means <- c('#F8766D','#A3A500','#00BF7D','#00B0F6','#E76BF3')
+# the map
+MapGroup    <- PTCA4CATA::createFactorMap(data_means,
+                            # use the constraint from the main map
+                            #constraints = baseMap.i$constraints,
+                            col.points = col4Data,
+                            cex = 7,  # size of the dot (bigger)
+                            col.labels =col4Data,
+                            text.cex = 6)
+
+
+# The map with observations and group means
+#a003.Map.Y.withMeans <- baseMap1.i$zeMap +MapGroup$zeMap_dots + MapGroup$zeMap_text
+a003.Map.Y.withMeans <- baseMap1$zeMap +MapGroup$zeMap_dots + MapGroup$zeMap_text + label2PLSC
+                         
+#dev.new()
+print(a003.Map.Y.withMeans)
+```
+
+
+**Lx2 & Ly2 showed perfect correlation**
+
+
+
+### Confidence Intervals  between Lx2 & Ly2
+```{r include=FALSE,eval=FALSE}
+# Confidence Intervals ----
+# Bootstrap for CI:
+BootCube <- PTCA4CATA::Boot4Mean(df1, 
+                                 design = DESIGN$rows$JobLevel$color_observ,
+                                 niter = 100,
+                                 suppressProgressBar = TRUE)
+
+#_____________________________________________________________________
+# Create the ellipses
+#_____________________________________________________________________
+# Create Confidence Interval Plots
+# use function MakeCIEllipses from package PTCA4CATA
+GraphElli <- PTCA4CATA::MakeCIEllipses(BootCube$BootCube[,1:2,],
+                            names.of.factors = c("Dimension 1","Dimension 2"),
+                            col = rownames(BootCube$BootCube[,c(1,2),1]),
+                            p.level = .95
+)
+#_____________________________________________________________________
+# create the I-map with Observations, means and confidence intervals
+#
+
+#z1 <- baseMap + GraphElli +MapGroup$zeMap_dots + MapGroup$zeMap_text
+
+a004.Map.Y.withCI <- baseMap1 + MapGroup$zeMap_text +  GraphElli
+#_____________________________________________________________________
+# plot it!
+#dev.new()
+print(a004.Map.Y.withCI)
+
+```
+
+
+### Tolerance Intervals
+
+```{r}
+# Tolerance Intervals ----
+# use function MakeToleranceIntervals from package PTCA4CATA
+GraphTI.Hull <- PTCA4CATA::MakeToleranceIntervals(df1,
+                            design = as.factor(sample.design),
+                            # line below is needed
+                            names.of.factors =  c("Dim1","Dim2"), # needed 
+                            col = rownames(BootCube$BootCube[,c(1,2),1]),
+                            line.size = .50, 
+                            line.type = 3,
+                            alpha.ellipse = .2,
+                            alpha.line    = .4,
+                            p.level       = .75)
+#_____________________________________________________________________
+# Create the map:
+a005.Map.Y.withTIHull <-a003.Map.Y.withMeans  +
+                            GraphTI.Hull #+ MapGroup$zeMap_dots +
+                           #MapGroup$zeMap_text + MapGroup$zeMap_dots + label2PLSC
+
+
+#z4 <- 
+
+#_____________________________________________________________________
+# plot it
+#dev.new()
+print(a005.Map.Y.withTIHull)
+
+```
+
+
+
+
+
+
+
+### Contribution Bars
+```{r echo=FALSE}
+#_____________________________________________________________________
+# Contribution Plots ----
+# get the Contributions and make a plot.
+#_____________________________________________________________________
+# Here we look only at the (signed) contributions for the variables
+# compute teh signed contributions
+signed.ctrI <- resPLSC$TExPosition.Data$ci * sign(resPLSC$TExPosition.Data$fi)
+
+b003.ctr.fi.1 <- PrettyBarPlot2(signed.ctrI[,1],
+                         threshold = 1 / NROW(signed.ctrI),
+                         font.size = 5,
+                         color4bar = gplots::col2hex(resPLSC$Plotting.Data$fi.col), # we need hex code
+                         main = 'Variable Contributions (Signed): Dimension 1',
+                         ylab = 'Contributions',
+                         ylim = c(1.2*min(signed.ctrI), 1.2*max(signed.ctrI)),horizontal=FALSE
+)
+#dev.new()
+print(b003.ctr.fi.1)
+
+
+signed.ctrJ <- resPLSC$TExPosition.Data$cj * sign(resPLSC$TExPosition.Data$fj)
+
+b003.ctr.fj.1 <- PrettyBarPlot2(signed.ctrJ[,1],
+                         threshold = 1 / NROW(signed.ctrJ),
+                         font.size = 5,
+                         color4bar = gplots::col2hex(resPLSC$Plotting.Data$fj.col), # we need hex code
+                         main = 'Variable Contributions (Signed): Dimension 1',
+                         ylab = 'Contributions',
+                         ylim = c(1.2*min(signed.ctrJ), 1.2*max(signed.ctrJ)),horizontal=FALSE
+)
+#dev.new()
+print(b003.ctr.fj.1)
+
+
+
+#signed.ctrI <- resPLSC$TExPosition.Data$ci * sign(resPLSC$TExPosition.Data$fi)
+
+b003.ctr.fi.2 <- PrettyBarPlot2(signed.ctrI[,2],
+                         threshold = 1 / NROW(signed.ctrI),
+                         font.size = 5,
+                         color4bar = gplots::col2hex(resPLSC$Plotting.Data$fi.col), # we need hex code
+                         main = 'Variable Contributions (Signed): Dimension 2',
+                         ylab = 'Contributions',
+                         ylim = c(1.2*min(signed.ctrI), 1.2*max(signed.ctrI)),horizontal=FALSE
+)
+#dev.new()
+print(b003.ctr.fi.2)
+
+
+#signed.ctrJ <- resPLSC$TExPosition.Data$cj * sign(resPLSC$TExPosition.Data$fj)
+
+b003.ctr.fj.2 <- PrettyBarPlot2(signed.ctrJ[,2],
+                         threshold = 1 / NROW(signed.ctrJ),
+                         font.size = 5,
+                         color4bar = gplots::col2hex(resPLSC$Plotting.Data$fj.col), # we need hex code
+                         main = 'Variable Contributions (Signed): Dimension 2',
+                         ylab = 'Contributions',
+                         ylim = c(1.2*min(signed.ctrJ), 1.2*max(signed.ctrJ)),horizontal=FALSE
+)
+#dev.new()
+print(b003.ctr.fj.2)
+
+
+```
+
+### Bootstrap Test
+```{r include=FALSE}
+#--------------------------------------------------------------------
+# Second: Compute the Bootstrap ratios
+#
+#' 
+resBoot4PLSC <- Boot4PLSC(year, # First Data matrix 
+                          income, # Second Data matrix
+                          nIter = 1000, # How many iterations
+                      Fi = resPLSC$TExPosition.Data$fi,
+                      Fj = resPLSC$TExPosition.Data$fj,
+                      nf2keep = 3,
+                      critical.value = 2,
+                      # To be implemented later
+                      # has no effect currently
+                      alphaLevel = .05)
+#
+# to see what results we have
+#print(resBoot4PLSC)
+# Exercise: Plot the Bootstrap ratios
+# along with their critical value. 
+# Question what do we conclude?
+#--------------------------------------------------------------------
+
+
+
+```
+
+### Bootstrap Ratios for first table
+```{r}
+laDim = 1
+ba001.BR1 <- PrettyBarPlot2(resBoot4PLSC$bootRatios.i[,laDim],
+                        threshold = 2,
+                        font.size = 5,
+                   color4bar = gplots::col2hex(resPLSC$Plotting.Data$fi.col), # we need hex code
+                   main = paste0(
+                     'Bootstrap ratio for Dimension:',laDim),
+                  ylab = 'Bootstrap ratios',horizontal=FALSE
+                  #ylim = c(1.2*min(BR[,laDim]), 1.2*max(BR[,laDim]))
+)
+#dev.new()
+print(ba001.BR1)
+
+
+laDim = 2
+ba001.BR2 <- PrettyBarPlot2(resBoot4PLSC$bootRatios.i[,laDim],
+                        threshold = 2,
+                        font.size = 5,
+                   color4bar = gplots::col2hex(resPLSC$Plotting.Data$fi.col), # we need hex code
+                   main = paste0(
+                     'Bootstrap ratio for Dimension:',laDim),
+                  ylab = 'Bootstrap ratios',horizontal=FALSE
+                  #ylim = c(1.2*min(BR[,laDim]), 1.2*max(BR[,laDim]))
+)
+#dev.new()
+print(ba001.BR2)
+
+
+
+
+```
+
+**1st Table: Monthly Income on the -ve side of DImension 1**
+
+### Bootstrap Ratios for second table
+```{r}
+laDim = 1
+ba001.BR1 <- PrettyBarPlot2(resBoot4PLSC$bootRatios.j[,laDim],
+                        threshold = 2,
+                        font.size = 5,
+                   color4bar = gplots::col2hex(resPLSC$Plotting.Data$fj.col), # we need hex code
+                   main = paste0(
+                     'Bootstrap ratio for Dimension:',laDim),
+                  ylab = 'Bootstrap ratios',horizontal=FALSE
+                  #ylim = c(1.2*min(BR[,laDim]), 1.2*max(BR[,laDim]))
+)
+#dev.new()
+print(ba001.BR1)
+
+
+laDim = 2
+ba001.BR2 <- PrettyBarPlot2(resBoot4PLSC$bootRatios.j[,laDim],
+                        threshold = 2,
+                        font.size = 5,
+                   color4bar = gplots::col2hex(resPLSC$Plotting.Data$fj.col), # we need hex code
+                   main = paste0(
+                     'Bootstrap ratio for Dimension:',laDim),
+                  ylab = 'Bootstrap ratios',horizontal=FALSE
+                  #ylim = c(1.2*min(BR[,laDim]), 1.2*max(BR[,laDim]))
+)
+#dev.new()
+print(ba001.BR2)
+
+
+
+
+```
+
+**2nd Table: Year realted variables are on the -ve side of DImension 1, and pecent salry hike is on +ve side of Dimension 1**
+
+
+## Conclusion
+- Saliences Fi when considered with factor score plot, showed higher Job Levels coincided with higher monthly income.  
+- Saliences Fj when considered with factor score plot, showed similar trend as above with all the year related 	variables.  	
+
+
+
+```{r eval=FALSE,include=FALSE}
+listSaved <- saveGraph2pptx(
+file2Save.pptx = '[Group2_Ajay]PLSC-IBM-HR-Employee-WithAttrition.pptx', 
+title = "PLSC", 
+addGraphNames = TRUE)
+```
+
+
+

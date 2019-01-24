@@ -1,0 +1,464 @@
+---
+title: "BADA"
+#author: "Ajay Attuchirayil Krishnankutty"
+#date: "11/5/2018"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+graphics.off()
+
+
+library(ExPosition)
+library(InPosition)
+library(xlsx)
+library(corrplot)
+
+library(dplyr)
+library(ggplot2)
+library(PTCA4CATA)
+library(data4PCCAR)
+library(corrplot)
+#install.packages('TExPosition')
+library(TExPosition)
+library(scales)
+
+library(TInPosition)
+library(officer)
+library(flextable)
+library(rvg)
+
+file4PLSCfunctions <- 'inferences4PLSC.R'
+# Source the function file:
+source(file4PLSCfunctions)
+
+```
+
+# Method : BADA (Barycentric Discriminant Analysis)
+Barycentric discriminant analysis (BADA) is a robust version of discriminant analysis that
+is used to assign, to pre-defined groups (also called categories), observations described by
+multiple variables. 
+By contrast with traditional discriminant analysis, BADA can be used
+even when the number of observations is smaller than the number of variables—This makes
+BADA particularly suited for the analysis of Big Data.
+
+## Data set: IBM-HR-Emplyee-WithAttrition
+
+The dataset given is regarding IBM employees, available to the HR section of the company to take decisions regarding attrition.
+
+It consists of data of 237 employees (rows), with 32 variables(columns) defining each employee based on position,education,department etc.
+
+
+```{r data_set,echo=FALSE,include=FALSE}
+# Dataset ----
+ibm.emp.data <- read.xlsx("IBM-HR-Emplyee-WithAttrition.xlsx", sheetName = "Sheet1",header=TRUE)
+rownames(ibm.emp.data) <- ibm.emp.data$Subj
+ibm.emp.data <- ibm.emp.data[-c(1)]
+cols <- c('Age','Gender','Education','MonthlyIncome','TotalWorkingYears','JobSatisfaction')
+head(ibm.emp.data[cols])
+
+```
+
+
+
+```{r}
+
+new.ibm.emp.data <- ibm.emp.data[sapply(ibm.emp.data, function(x) !is.factor(x))]
+
+
+```
+
+### Heat Map
+
+After removing the factor variables we have mostly numeric ones, but in those also we have some ordinal ones,
+and few have very higher range than others like income etc.  
+
+So I tried plotting different heatmaps including ordinal ones, income ones (with log), and the remaining quant ones together.  
+
+- Income Map : Monthly is higher than Daily rate which is again higher than Hourly Rate,Monthly rate seems to be                      higher throughout.  
+- Ordinal Ones : Employees on higher Job Level have stock options
+                  Employees with good work life balance have better satisfaction all through  
+                 
+
+```{r}
+
+color4Var <- prettyGraphs::prettyGraphsColorSelection(ncol(new.ibm.emp.data))
+
+corrMatBurt.list <- phi2Mat4BurtTable(new.ibm.emp.data)
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+corr4MCA.r <- corrplot::corrplot(
+as.matrix(corrMatBurt.list$phi2.mat),
+method="color", col=col(200),
+type="upper",
+addCoef.col = "black", # Add coefficient of correlation
+tl.col=color4Var,
+tl.srt = 45, #Text label color and rotation
+number.cex = .5,
+diag = TRUE # needed to have the color of variables correct
+)
+
+
+
+```
+
+
+
+```{r DESIGN,echo=FALSE,include=FALSE}
+#Create an empty list, called DESIGN
+JL <- ibm.emp.data$JobLevel
+JLU <- unique(ibm.emp.data$JobLevel)
+
+DESIGN <- list()
+#We take all the unique values possible in the specified column if the dataframe
+DESIGN$rows$JobLevel$labels <- unique(ibm.emp.data$JobLevel)
+#Storing the categorical values in a vector
+DESIGN$rows$JobLevel$vec <- ibm.emp.data$JobLevel
+#Convert the vector to a matrix
+DESIGN$rows$JobLevel$mat <- makeNominalData(as.matrix(DESIGN$rows$JobLevel$vec))
+
+```
+
+
+
+```{r colors_2,echo=FALSE,include=FALSE}
+
+#As our group has 5 levels we specify same number of colors
+DESIGN$rows$JobLevel$color_groups <- c("red", "green", "magenta", "blue","yellow")
+#plot(c(1:5), pch=15, cex=4, col=DESIGN$rows$JobLevel$color_groups) 
+
+#First, copy the group names
+DESIGN$rows$JobLevel$color_observ <- as.matrix(DESIGN$rows$JobLevel$vec)
+
+#Then, for each group, replace the group name with the group's color
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="1")]  <- DESIGN$rows$JobLevel$color_groups[1]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="2")]  <- DESIGN$rows$JobLevel$color_groups[2]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="3")]  <- DESIGN$rows$JobLevel$color_groups[3]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="4")]  <- DESIGN$rows$JobLevel$color_groups[4]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="5")]  <- DESIGN$rows$JobLevel$color_groups[5]
+
+```
+
+
+
+## RUnning BADA
+
+```{r}
+
+#new.ibm.emp.data1 <- subset(new.ibm.emp.data, select = -c(JobLevel,PerformanceRating))
+new.ibm.emp.data1 <- subset(new.ibm.emp.data, select = -c(JobLevel))
+#new.ibm.emp.data1 <- subset(new.ibm.emp.data, select = -c(PerformanceRating))
+
+resBADA <- tepBADA(DATA = new.ibm.emp.data1,
+                   scale = 'SS1', center = TRUE,
+                   #DESIGN = DESIGN$rows$JobLevel$color_observ,
+                   DESIGN = JL,
+                   make_design_nominal = TRUE,
+                   group.masses = NULL,
+                   weights = NULL, graphs =  FALSE)
+
+resBADA.inf <- tepBADA.inference.battery(DATA = new.ibm.emp.data1,
+                   scale = 'SS1', center = TRUE,
+                   #DESIGN = DESIGN$rows$JobLevel$color_observ  ,
+                   DESIGN = JL,
+                   make_design_nominal = TRUE,
+                   group.masses = NULL,
+                   weights = NULL,
+                   graphs = FALSE,
+                   test.iters = 100)
+```
+
+
+### Scree Plot
+```{r}
+# A look at the scree
+#dev.new()
+PlotScree(ev = resBADA$TExPosition.Data$eigs,
+          #p.ev = resBADA.inf$Inference.Data$components$p.vals,# max.ev = NULL, alpha = 0.05,
+          #col.ns = "#006D2C", col.sig = "#54278F",
+          title = "Explained Variance per Dimension",plotKaiser = TRUE)
+BADAScree <- recordPlot()
+
+```
+
+```{r,echo=FALSE}
+#---------------------------------------------------------------------
+# To minimize typing:
+Fi <- resBADA$TExPosition.Data$fi
+Fk <- resBADA$TExPosition.Data$fii
+Fj <- resBADA$TExPosition.Data$fj
+Cj <- resBADA$ExPosition.Data$cj
+Eigs <- resBADA$TExPosition.Data$eigs
+tau <- resBADA$TExPosition.Data$t
+
+labels4BADA_12 <- createxyLabels.gen(x_axis = 1, y_axis = 2,
+              lambda = Eigs,tau =tau)
+
+#---------------------------------------------------------------------
+```
+
+
+### Loading plots
+```{r}
+
+#---------------------------------------------------------------------
+# A graph for the J set
+baseMap.j <- PTCA4CATA::createFactorMap(Fj,
+                            col.points   = 'darkorchid',
+                            alpha.points =  .3,
+                            alpha.labels =  .7,
+                            col.labels   = 'darkorchid')
+# A graph for the J-set
+aggMap.j <- baseMap.j$zeMap_background + # background layer
+  baseMap.j$zeMap_dots + baseMap.j$zeMap_text # dots & labels
+# We print this Map with the following code
+#dev.new()
+print(aggMap.j + labels4BADA_12)
+```
+
+```{r}
+# De we want to add lines?
+# PTCA4CATA does not have arrowed lines,
+#    but this line of code create them
+zeLines <- ggplot2::annotate("segment", x = c(0), y = c(0),
+                    xend = Fj[,1],
+                    yend = Fj[,2],
+                    color = 'darkorchid',
+                    alpha = .5,
+                    arrow = arrow(length = unit(.3, "cm") ) )
+# Create the map by adding background, labels, and arrows:
+aggMap.j.arrows <- baseMap.j$zeMap_background +
+                                      zeLines + baseMap.j$zeMap_text
+#dev.new()
+print(aggMap.j.arrows + labels4BADA_12)
+```
+
+
+
+## I Set map
+```{r}
+#---------------------------------------------------------------------
+# Graphs for the I set
+
+
+
+baseMap.i <- createFactorMap(Fk, 
+                             col.points = DESIGN$rows$JobLevel$color_observ,
+                             col.labels = 'darkorchid',title = "Factor scores by Job Level",display.labels = FALSE)  
+
+aggMap.i <- baseMap.i$zeMap_background + baseMap.i$zeMap_dots
+
+print(baseMap.i$zeMap +labels4BADA_12)
+
+#dev.new()
+#print(aggMap.i)
+```
+
+## Means
+```{r}
+
+data_means <- PTCA4CATA::getMeans(Fk, ibm.emp.data$JobLevel)
+rownames(data_means) = c("JL5","JL2","JL3","JL4","JL1")
+
+# the map
+MapGroup    <- PTCA4CATA::createFactorMap(data_means,
+                            # use the constraint from the main map
+                            #constraints = baseMap.i$constraints,
+                            col.points = DESIGN$rows$JobLevel$color_groups,
+                            cex = 7,  # size of the dot (bigger)
+                            display.labels = TRUE,
+                            col.labels = DESIGN$rows$JobLevel$color_groups,
+                            text.cex = 6)
+
+
+# The map with observations and group means
+aggMap.i.withMeans <- aggMap.i+
+  MapGroup$zeMap_dots + MapGroup$zeMap_text
+#dev.new()
+print(aggMap.i.withMeans + labels4BADA_12)
+#---------------------------------------------------------------------
+```
+
+
+## Tolerance Interval
+```{r}
+#---------------------------------------------------------------------
+# Create 75% Tolerance interval polygons
+#
+GraphTI.Hull.90 <- MakeToleranceIntervals(Fk,
+                                  ibm.emp.data$JobLevel,
+                                  names.of.factors = c("Dim1","Dim2"),
+                                  col = DESIGN$rows$JobLevel$color_groups,
+                                  line.size = .5, line.type = 3,
+                                  alpha.ellipse = .2,
+                                  alpha.line = .4,
+                                  p.level = .75, # 75% TI
+                                  type = 'hull' #
+                                          # use 'hull' for convex hull
+)
+#---------------------------------------------------------------------
+# Create the map
+aggMap.i.withHull <- aggMap.i +
+  GraphTI.Hull.90 + MapGroup$zeMap_dots +
+  MapGroup$zeMap_text +  MapGroup$zeMap_dots
+#---------------------------------------------------------------------
+# Plot it!
+#dev.new()
+print(aggMap.i.withHull + labels4BADA_12)
+#---------------------------------------------------------------------
+```
+
+### Confusion Matrix
+```{r}
+fixedCM   <-   resBADA.inf$Inference.Data$loo.data$fixed.confuse
+looedCM   <- resBADA.inf$Inference.Data$loo.data$loo.confuse
+
+print(fixedCM)
+print(looedCM)
+```
+
+### Confidence Intervals
+```{r}
+# Confidence Intervals ----
+
+
+# Bootstrap for CI:
+BootCube <- PTCA4CATA::Boot4Mean(Fk,
+                                 design = ibm.emp.data$JobLevel,
+                                 niter = 100,
+                                 suppressProgressBar = TRUE)
+
+
+GraphElli <- PTCA4CATA::MakeCIEllipses(BootCube$BootCube[,1:2,],
+                            names.of.factors = c("Dimension 1","Dimension 2"),
+                            col = DESIGN$rows$JobLevel$color_groups,
+                            
+                            p.level = .95
+)
+
+a004.Map.I.withCI <-  aggMap.i + MapGroup$zeMap_text +  GraphElli + labels4BADA_12
+
+print(a004.Map.I.withCI)
+
+```
+
+## Inference
+```{r include=FALSE,eval=FALSE}
+#---------------------------------------------------------------------
+# Inferences
+#
+
+#---------------------------------------------------------------------
+# Confusion matrices
+# To be saved as table
+fixedCM   <-   resBADA.inf$Inference.Data$loo.data$fixed.confuse
+looedCM   <- resBADA.inf$Inference.Data$loo.data$loo.confuse
+
+#---------------------------------------------------------------------
+# Create Confidence Interval Plots
+BootCube <- resBADA.inf$Inference.Data$boot.data$fi.boot.data$boots
+#dimnames(BootCube)[[2]] <- c("Dimension 1","Dimension 2")
+# use function MakeCIEllipses from package PTCA4CATA
+GraphElli <- MakeCIEllipses(BootCube[,1:2,],
+                  names.of.factors = c("Dimension 1","Dimension 2"),
+                  #col = rownames(BootCubeBootCube[,c(1,2),1]),
+                  p.level = .95
+)
+#---------------------------------------------------------------------
+# create the I-map with Observations, means and confidence intervals
+#
+aggMap.i.withCI <-  aggMap.i +  GraphElli + MapGroup$zeMap_text + labels4BADA_12
+#---------------------------------------------------------------------
+# plot it!
+#dev.new()
+print(aggMap.i.withCI)
+```
+
+
+
+
+## Contribution Plot
+
+```{r}
+#_____________________________________________________________________
+# Contribution Plots ----
+# get the Contributions and make a plot.
+#_____________________________________________________________________
+# Here we look only at the (signed) contributions for the variables
+# compute teh signed contributions
+signed.ctrJ <- resBADA$TExPosition.Data$cj * sign(resBADA$TExPosition.Data$fj)
+
+b003.ctrJ.bada.1 <- PrettyBarPlot2(signed.ctrJ[,1],
+                         threshold = 1 / NROW(signed.ctrJ),
+                         font.size = 5,
+                         color4bar = gplots::col2hex(resBADA$Plotting.Data$fj.col), # we need hex code
+                         main = 'Variable Contributions (Signed): Dimension 1',
+                         ylab = 'Contributions',
+                         ylim = c(1.2*min(signed.ctrJ), 1.2*max(signed.ctrJ))
+)
+#dev.new()
+print(b003.ctrJ.bada.1)
+
+
+b004.ctrJ.bada.2 <- PrettyBarPlot2(signed.ctrJ[,2],
+                           threshold = 1 / NROW(signed.ctrJ),
+                           font.size = 5,
+                           color4bar = gplots::col2hex(resBADA$Plotting.Data$fj.col), # we need hex code
+                           main = 'Variable Contributions (Signed): Dimension 2',
+                           ylab = 'Contributions',
+                           ylim = c(1.2*min(signed.ctrJ), 1.2*max(signed.ctrJ))
+)
+#dev.new()
+print(b004.ctrJ.bada.2)
+
+```
+
+**Age, Monthly Income,Total Working Years and other Year realted variables lie on the -ve side of dimension 1**
+**Performance Rating, Percent Salary Hike, Train Times Last Year on +ve side of dimension 1**
+**DailyRate, Monthly Rate,WorkLifeBalance, EnvironmentStifaction on -ve of DImension 2**
+**Hourly Rate, DIstFrm Home, Education, Job Invovlement Job Satisfactio on +ve of Dimesnion 2**
+
+## Bootstrap Bars
+
+```{r}
+
+BADA.BR <- resBADA.inf$Inference.Data$boot.data$fj.boot.data$tests$boot.ratios
+laDim = 1
+ba001.bada.BR1 <- PrettyBarPlot2(BADA.BR[,laDim],
+                        threshold = 2,
+                        font.size = 5,
+                   color4bar = gplots::col2hex(resBADA$Plotting.Data$fj.col), # we need hex code
+                   main = paste0(
+                     'Bootstrap ratio for Dimension:',laDim),
+                  ylab = 'Bootstrap ratios'
+                  #ylim = c(1.2*min(BR[,laDim]), 1.2*max(BR[,laDim]))
+)
+#dev.new()
+print(ba001.bada.BR1)
+#
+laDim = 2
+ba002.bada.BR2 <- PrettyBarPlot2(BADA.BR[,laDim],
+                            threshold = 2,
+                            font.size = 5,
+                            color4bar = gplots::col2hex(resBADA$Plotting.Data$fj.col), # we need hex code
+                            main = paste0(
+                              'Bootstrap ratio for Dimension:',laDim),
+                ylab = 'Bootstrap ratios'
+)
+#dev.new()
+print(ba002.bada.BR2)
+```
+**Age, Monthly Income,Total Working Years and other Year realted variables lie on the -ve side of dimension 1**  
+**Performance Rating, Percent Salary Hike, Train Times Last Year on +ve side of dimension 1**  
+**Monthly Rate,WorkLifeBalance,Perf Rating on -ve of DImension 2**  
+
+
+
+## Conclusion
+- BADA was applied and categorized based on Job Level (which) had 5 levels.  
+- Factor scores were divided amongst the Job levels, with less overlapping.  
+- Based on which we can predict the levels of supplemental observations.

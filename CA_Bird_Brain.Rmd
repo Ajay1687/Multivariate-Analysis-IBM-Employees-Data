@@ -1,0 +1,398 @@
+
+---
+title: "CA on Bird_Brain"
+#author: "Ajay Attuchirayil Krishnankutty"
+#date: "10/2/2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r CA_setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+graphics.off()
+
+library(ExPosition)
+library(InPosition)
+# use the last version of PTCA
+#devtools::install_github('HerveAbdi/PTCA4CATA')
+library(PTCA4CATA)
+library(corrplot)
+library(ggplot2)
+#install.packages('gplots')
+# also install data4PCCAR
+#devtools::install_github('HerveAbdi/data4PCCAR')
+library(data4PCCAR)
+```
+
+
+# Correspondence Analysis
+CA is a generalized version of PCA for analyzing data table with qualitative variables.
+In case of PCA we divided the table into factor scores(rows) and loadings(variables), where as in CA, we derive 2 set of factor scores one for the rows and the other for the columns.
+-Rows have masses representing each rows importance wrt the total table
+-similarly Columns have weights each columns importance in describing each of the rows
+
+
+
+## Dataset: Bird Brain
+The Bird Brain data set  contains data about about 28 different birds species, and they are measured using 11 variables, one being categorical and remaining 10 quantitative.
+One categorical variable groups these birds into different levels.
+The quant variables describe the count of neurons in various structure of brain.
+```{r}
+#Fetching the Bird brian dataset
+
+bb_df <- read.csv("BirdBrain.csv")
+
+cols <- c('X','Order','Whole.Brain','Pallium','Diencephalon','Cerebellum')
+head(bb_df[cols])
+
+```
+
+
+
+#### Working on dataset
+
+```{r}
+row.names(bb_df) <- bb_df$X
+new_bb_df <- bb_df[-c(1,2)]
+B <- as.matrix(new_bb_df)
+
+```
+
+
+
+
+### Heatmap 
+
+**Heat map shows that the cerebellum part is the most crowdedwith neurons for all the species observed here.**
+
+-Goldcrest has more density in 3 more portions of brain.
+
+-Parrot has a rare higher density at subpallium
+
+-While EMu has pretty musch lesser neurons than rest in all regions except cerebellum.
+
+```{r}
+#heatmap(B,Rowv=NA,Colv=NA,main="Heat map for Bird Brain",xlab="Log(num of Neuron) as per brain struture",ylab="Bird Species",margins=c(10,8) )
+
+col4J.Bird <- prettyGraphsColorSelection(NCOL(bb_df))
+c000.heatMapIJ.IBM <- makeggHeatMap4CT(new_bb_df,
+                                       colorAttributes = col4J.Bird,
+fontSize.x = 15)
+print(c000.heatMapIJ.IBM)
+
+```
+
+
+
+### 1st Design Variable : Order
+
+Selecting order as the grouping variable
+
+```{r DESIGN_CA}
+#Create an empty list, called DESIGN
+DESIGN <- list()
+#We take all the unique values possible in the specified column if the dataframe
+DESIGN$rows$Order$labels <- unique(bb_df$Order)
+#Storing the categorical values in a vector
+DESIGN$rows$Order$vec <- bb_df$Order
+#Convert the vector to a matrix
+DESIGN$rows$Order$mat <- makeNominalData(as.matrix(DESIGN$rows$Order$vec))
+
+```
+
+### Assiging color to the groups
+```{r DESIGN_CA_colors_2}
+DESIGN$rows$Order$color_groups <- c("red", "green", "magenta", "blue","yellow","brown","orange")
+#First, copy the group names
+DESIGN$rows$Order$color_observ <- as.matrix(DESIGN$rows$Order$vec)
+count = 0
+for (val in unique(bb_df$Order)) {
+  count = count + 1
+  DESIGN$rows$Order$color_observ[which(DESIGN$rows$Order$vec==val)]  <- DESIGN$rows$Order$color_groups[count]
+}
+
+```
+
+
+
+
+## Running CA
+
+Running the symmetric and asymmetric as well as the inference pca
+```{r}
+# Running the Symmetric CA
+resCA.sym  <- epCA(B, symmetric = TRUE,DESIGN = bb_df$Order)
+
+# to run a plain CA but asymetric
+resCA.asym <- epCA(B, symmetric = FALSE,DESIGN = bb_df$Order)
+
+
+resCA.inf <- InPosition::epCA.inference.battery(DATA = B,
+                   #scale = 'SS1', # Make sure to use 'SS1' rather than TRUE
+                   DESIGN = bb_df$Order,
+                   graphs =  FALSE # TRUE first pass only
+                    )
+
+
+# HA as sup ----
+#HA.sup <- supplementaryRows(SUP.DATA = HApunct, res = resCA.sym)
+# Other punct ----
+#punct.sup <- supplementaryCols(SUP.DATA = otherPunct, res = resCA.sym)
+
+```
+
+
+### Scree Plot
+
+**From the permutation test on the scree plot, we can see that 2 components are of significance**
+```{r}
+EigenValues <- resCA.asym$ExPosition.Data$eigs
+
+
+PlotScree(ev = EigenValues, 
+       p.ev =  resCA.inf$Inference.Data$components$p.vals,
+       title = "Scree Plot with Permutation Test",
+       plotKaiser = TRUE
+          )
+a001a.screePlot <- recordPlot()
+#dev.new()
+print(a001a.screePlot)
+
+```
+
+
+```{r,include=FALSE}
+# CA graphs ----
+# to make life easier ----
+#Fi.a <- resCA.asym$ExPosition.Data$fi ##Additional
+Fj.a <- resCA.asym$ExPosition.Data$fj
+Fi   <- resCA.sym$ExPosition.Data$fi
+Fj   <- resCA.sym$ExPosition.Data$fj
+
+# constraints -----
+# first get the constraints correct
+constraints.sym <- minmaxHelper(mat1 = Fi, mat2  = Fj)
+constraints.asym <- minmaxHelper(mat1 = Fi, mat2  = Fj.a)    ##Can add Fi.a
+#constraints.sup <- minmaxHelper(mat1 = rbind(Fi, HA.sup$fii), mat2  = rbind(Fj, punct.sup$fjj) )
+```
+
+### Creating Base maps
+```{r}
+# Get some colors ----
+#length(unique(bb_df$Order))
+color4Authors <-prettyGraphsColorSelection(n.colors = nrow(Fi))
+# baseMaps ----
+baseMap.i <- createFactorMap(Fi, constraints = constraints.sym,
+                             col.points = color4Authors,
+                             col.labels = color4Authors,title = "Neuron Distribution in Birds")
+#dev.new()
+print(baseMap.i$zeMap)
+
+
+baseMap.j <- createFactorMap(Fj, constraints = constraints.sym,
+                             color.points = 'darkorchid4')
+#dev.new()
+print(baseMap.j$zeMap)
+print(baseMap.i$zeMap + baseMap.j$zeMap_dots + baseMap.j$zeMap_text)
+```
+
+
+
+### Plotting observation for symmetric and asymmetric
+```{r}
+
+
+symMap  <- createFactorMapIJ(Fi,Fj,
+                             col.points.i = DESIGN$rows$Order$color_observ,
+                             col.labels.i = DESIGN$rows$Order$color_observ)
+
+asymMap  <- createFactorMapIJ(Fi,Fj.a,
+                              col.points.i = DESIGN$rows$Order$color_observ,
+                              col.labels.i = DESIGN$rows$Order$color_observ)
+
+labels4CA <- createxyLabels(resCA = resCA.sym)
+```
+
+## Inferences
+
+### Contribution Plot
+
+**Tectum,Diencephalon and Brainstem have significant contributions to the Dimension 1**
+**Whereas, Subpallium,Cerebellum and Rest of Brain have more significant contributions in Dimension 2**
+```{r}
+#_____________________________________________________________________
+# Contribution Plots ----
+# get the Contributions and make a plot.
+#_____________________________________________________________________
+# Here we look only at the (signed) contributions for the variables
+# compute teh signed contributions
+signed.ctrJ <- resCA.sym$ExPosition.Data$cj * sign(resCA.sym$ExPosition.Data$fj)
+
+b003.ctrJ.s.1 <- PrettyBarPlot2(signed.ctrJ[,1],
+                         threshold = 1 / NROW(signed.ctrJ),
+                         font.size = 5,
+                         color4bar = gplots::col2hex(resCA.sym$Plotting.Data$fj.col), # we need hex code
+                         main = 'Variable Contributions (Signed): Dimension 1',
+                         ylab = 'Contributions',
+                         ylim = c(1.2*min(signed.ctrJ), 1.2*max(signed.ctrJ))
+)
+#dev.new()
+print(b003.ctrJ.s.1)
+
+
+b004.ctrJ.s.2 <- PrettyBarPlot2(signed.ctrJ[,2],
+                           threshold = 1 / NROW(signed.ctrJ),
+                           font.size = 5,
+                           color4bar = gplots::col2hex(resCA.sym$Plotting.Data$fj.col), # we need hex code
+                           main = 'Variable Contributions (Signed): Dimension 2',
+                           ylab = 'Contributions',
+                           ylim = c(1.2*min(signed.ctrJ), 1.2*max(signed.ctrJ))
+)
+#dev.new()
+print(b004.ctrJ.s.2)
+
+```
+
+### COntribution Plots Asymetric
+```{r}
+#_____________________________________________________________________
+# Contribution Plots ----
+# get the Contributions and make a plot.
+#_____________________________________________________________________
+# Here we look only at the (signed) contributions for the variables
+# compute teh signed contributions
+signed.ctrJ.a <- resCA.asym$ExPosition.Data$cj * sign(resCA.asym$ExPosition.Data$fj)
+
+b003.ctrJ.a.1 <- PrettyBarPlot2(signed.ctrJ.a[,1],
+                         threshold = 1 / NROW(signed.ctrJ.a),
+                         font.size = 5,
+                         color4bar = gplots::col2hex(resCA.asym$Plotting.Data$fj.col), # we need hex code
+                         main = 'Variable Contributions (Signed): Dimension 1',
+                         ylab = 'Contributions',
+                         ylim = c(1.2*min(signed.ctrJ.a), 1.2*max(signed.ctrJ.a))
+)
+#dev.new()
+print(b003.ctrJ.a.1)
+
+
+b004.ctrJ.a.2 <- PrettyBarPlot2(signed.ctrJ.a[,2],
+                           threshold = 1 / NROW(signed.ctrJ.a),
+                           font.size = 5,
+                           color4bar = gplots::col2hex(resCA.asym$Plotting.Data$fj.col), # we need hex code
+                           main = 'Variable Contributions (Signed): Dimension 2',
+                           ylab = 'Contributions',
+                           ylim = c(1.2*min(signed.ctrJ.a), 1.2*max(signed.ctrJ.a))
+)
+#dev.new()
+print(b004.ctrJ.a.2)
+
+```
+
+
+
+
+### Bootstrap Bars
+**For Dimension 1 its shows, all the variables have significant contribution**
+**FOr Dimension 2 its shows, Subpallium,Tectum,Diencephalon and Brainstem have significant contribution**
+
+```{r}
+
+BR <- resCA.inf$Inference.Data$fj.boots$tests$boot.ratios
+laDim = 1
+ba001.BR1 <- PrettyBarPlot2(BR[,laDim],
+                        threshold = 2,
+                        font.size = 5,
+                   color4bar = gplots::col2hex(resCA.sym$Plotting.Data$fj.col), # we need hex code
+                   main = paste0(
+                     'Bootstrap ratio for Dimension:',laDim),
+                  ylab = 'Bootstrap ratios'
+                  #ylim = c(1.2*min(BR[,laDim]), 1.2*max(BR[,laDim]))
+)
+#dev.new()
+print(ba001.BR1)
+#
+laDim = 2
+ba002.BR2 <- PrettyBarPlot2(BR[,laDim],
+                            threshold = 2,
+                            font.size = 5,
+                            color4bar = gplots::col2hex(resCA.sym$Plotting.Data$fj.col), # we need hex code
+                            main = paste0(
+                              'Bootstrap ratio for Dimension:',laDim),
+                ylab = 'Bootstrap ratios'
+)
+#dev.new()
+print(ba002.BR2)
+```
+
+
+### Symmetric and Asymmetric Plots
+
+**->From the symmetric plot:**
+  **- we can interpret that the Passeriformes(GOldcrest, STraling etc) have more neurons towards Brainstem & Diencephalon           compared to others.**
+  **- Psittaciformes(Parrot, Parakeet) have more neuron towards Subpallium region**
+  **- Corvid(Raven, MAgpie) are towards Pallium**
+  **- WHile Emu, Pigeon, Owl etc ae far from others but still closer to the cerebellum region**
+
+
+```{r}
+# draw the maps ----
+
+
+map.IJ.sym <- symMap$baseMap + symMap$I_labels + symMap$I_points +
+  symMap$J_labels + symMap$J_points + labels4CA
+
+#dev.new()
+print(map.IJ.sym)
+
+
+map.IJ.asym <- asymMap$baseMap + asymMap$I_labels + 
+  asymMap$I_points + asymMap$J_labels + 
+  asymMap$J_points + labels4CA
+
+
+#dev.new()
+print(map.IJ.asym)
+```
+
+
+
+```{r , include=FALSE}
+# create an asymetric map with a supplementary row
+#map.I.sup.asym <- asymMap$baseMap + asymMap$I_labels + 
+#  asymMap$I_points +
+#  asymMap$J_labels + asymMap$J_points + 
+  #mapSup$I_labels + mapSup$I_points +
+#  labels4CA
+#dev.new()
+#print(map.I.sup.asym)
+
+```
+
+```{r,include=FALSE}
+# Create a symmetric map with sup and correct constraints
+#map.IJ.sup.sym <- mapSup$baseMap + 
+ # symMap$I_labels + symMap$I_points +
+ # symMap$J_labels + symMap$J_points + 
+  #mapSup$I_labels + mapSup$I_points + 
+  #mapSup$J_labels + mapSup$J_points +
+ # ggtitle('Symmetric Map with Supplementary Elements') + 
+ # labels4CA
+#print(map.IJ.sup.sym)
+
+
+
+```
+
+## Conclusion
+### Component 1:  
+**Rows: Passeriformes VS Psittaciformes & Corvid**
+**Columns : Brainstem,Diencephalon and Tectum VS Others**
+### Component 2:  
+**Rows: Struthioniformes(Emu) & Columbiformes(Pigeon) & Galliformes(Junglefowl)  VS Rest**
+**Columns : Rest of Brain & Subpallium VS Cerebellum & Whole Brain**
+
+**Interpretation : Majority birds are concentrated near the whole brain, palium,telencephalon region. Few birds of Passeriformes order have neurons in Diencephalon & Brainstem. While EMu shows more neurons near the Cerebellum area.**
+

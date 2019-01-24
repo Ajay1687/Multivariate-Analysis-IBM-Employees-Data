@@ -1,0 +1,387 @@
+
+---
+title: "MFA"
+#author: "Ajay Attuchirayil Krishnankutty"
+#date: "11/19/2018"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r MFA_setup, include=FALSE}
+rm(list = ls())
+graphics.off()
+
+knitr::opts_chunk$set(echo = TRUE)
+
+#install.packages('DistatisR')
+
+library(ExPosition)
+library(InPosition)
+library(xlsx)
+library(corrplot)
+
+library(dplyr)
+library(ggplot2)
+library(PTCA4CATA)
+library(data4PCCAR)
+library(corrplot)
+
+library(scales)
+
+library(TInPosition)
+library(officer)
+library(flextable)
+library(rvg)
+
+library(useful)
+
+library(MExPosition)
+```
+
+
+# Multiple Factor Analysis
+MFA is used to handle multiple tables, that have different variables measuring the same observations, or same set of variables on different set of observations.
+- First, each table is normalized by 1st singular value (obtained by doing PCA on the same table)
+- All these normalized tables are merged together and then again a PCA is done on this, which gives us factor score and loading on these variables.
+
+
+## Data set: IBM-HR-Emplyee-WithAttrition
+
+The dataset given is regarding IBM employees, available to the HR section of the company to take decisions regarding attrition.
+
+It consists of data of 237 employees (rows), with 32 variables(columns) defining each employee based on position,education,department etc.
+
+
+```{r MFA_data_set}
+# Dataset ----
+ibm.emp.data <- read.xlsx("IBM-HR-Emplyee-WithAttrition.xlsx", sheetName = "Sheet1",header=TRUE)
+rownames(ibm.emp.data) <- ibm.emp.data$Subj
+ibm.emp.data <- ibm.emp.data[-c(1)]
+cols <- c('Age','Gender','Education','MonthlyIncome','TotalWorkingYears','JobSatisfaction')
+head(ibm.emp.data[cols])
+
+```
+### Removing Factor variables
+```{r}
+new.ibm.emp.data <- ibm.emp.data[sapply(ibm.emp.data, function(x) !is.factor(x))]
+```
+
+
+### Splitting the data into 3 tables, 2 for the correaltion operation, 3rd for the deisgn
+```{r}
+new.ibm.emp.data1 <- subset(new.ibm.emp.data, select = -c(JobLevel))
+
+dim(new.ibm.emp.data1)
+colnames(new.ibm.emp.data1)
+#a <- c('1','1','1','1','1','1','2','2','2','2','2','2','3','3','3','3','3','3','3','3','3','3')
+#column.design <- c(1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3)
+column.design <- c(1,1,1,1,1,1,2,2,2,2,2,2,3,3,2,3,3,3,3,2,2,2)
+
+column.design = t(as.matrix((column.design)))
+colnames(column.design) <- colnames((new.ibm.emp.data1))
+
+
+
+
+
+#a <- as.data.frame(a)
+#colnames(a[1:6]) = colnames(new.ibm.emp.data1[1:6])
+#a
+#colnames(a)<-colnames(new.ibm.emp.data1)
+#column.design[a]= colnames(new.ibm.emp.data1)
+
+#typeof(new.ibm.emp.data1)
+  # MFA
+#  data('wines2007')
+ # demo.mfa.2007 <- mpMFA(wines2007$data, wines2007$table)
+#  print(wines2007$data)
+
+#column.design = rep(1, length.out = ncol(new.ibm.emp.data1) )
+#column.design[ grep('Year',colnames(new.ibm.emp.data)) ] = 2
+#column.design[ grep('Rate',colnames(new.ibm.emp.data)) ] = 3
+#column.design = t(as.matrix(column.design))
+#colnames(column.design) = colnames(new.ibm.emp.data1)
+
+
+```
+
+
+```{r MFA_DESIGN, include=FALSE,echo=FALSE}
+#Create an empty list, called DESIGN
+DESIGN <- list()
+
+
+#We take all the unique values possible in the specified column if the dataframe
+DESIGN$rows$JobLevel$labels <- unique(ibm.emp.data$JobLevel)
+
+
+#Storing the categorical values in a vector
+DESIGN$rows$JobLevel$vec <- ibm.emp.data$JobLevel
+
+#Convert the vector to a matrix
+DESIGN$rows$JobLevel$mat <- makeNominalData(as.matrix(DESIGN$rows$JobLevel$vec))
+
+```
+
+
+
+
+```{r MFA_colors_2, include=FALSE,echo=FALSE}
+
+#As our group has 5 levels we specify same number of colors
+
+
+DESIGN$rows$JobLevel$color_groups <- c("red", "green", "magenta", "blue","yellow")
+
+
+#plot(c(1:5), pch=15, cex=4, col=DESIGN$rows$JobLevel$color_groups) 
+
+#First, copy the group names
+DESIGN$rows$JobLevel$color_observ <- as.matrix(DESIGN$rows$JobLevel$vec)
+
+#Then, for each group, replace the group name with the group's color
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="1")]  <- DESIGN$rows$JobLevel$color_groups[1]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="2")]  <- DESIGN$rows$JobLevel$color_groups[2]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="3")]  <- DESIGN$rows$JobLevel$color_groups[3]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="4")]  <- DESIGN$rows$JobLevel$color_groups[4]
+DESIGN$rows$JobLevel$color_observ[which(DESIGN$rows$JobLevel$vec=="5")]  <- DESIGN$rows$JobLevel$color_groups[5]
+
+```
+
+## Running MFA
+```{r}
+#new.ibm.emp.data1 <- subset(new.ibm.emp.data, select = -c(JobLevel))
+res.mfa <- mpMFA(new.ibm.emp.data1,as.matrix(column.design),make.columndesign.nominal = TRUE,graphs = FALSE)
+
+```
+
+
+```{r echo = FALSE}
+Eigs <- res.mfa$mexPosition.Data$Table$eigs
+tau <- res.mfa$mexPosition.Data$Table$t
+Fj <- res.mfa$mexPosition.Data$Table$Q
+Cj <- res.mfa$mexPosition.Data$Table$cj
+
+color4Var <- prettyGraphs::prettyGraphsColorSelection(ncol(ibm.emp.data))
+col4Levels <- data4PCCAR::coloringLevels(rownames(Fj), color4Var)
+col4Labels <- col4Levels$color4Levels
+
+varCtr <- data4PCCAR::ctr4Variables(Cj)
+
+
+
+absCtrVar <- as.matrix(varCtr) %*% diag(Eigs)
+varCtr12 <- (absCtrVar[,1] + absCtrVar[,2]) /(Eigs[1] + Eigs[2])
+importantVar <- (varCtr12 >= 1 / length(varCtr12))
+col4ImportantVar <- color4Var
+col4NS <- 'gray90'
+col4ImportantVar[!importantVar] <- col4NS
+#Color for importance in  variables
+col4Levels.imp <- data4PCCAR::coloringLevels(rownames(Fj),col4ImportantVar)
+
+```
+
+### Scree Plot
+```{r}
+# A look at the scree
+#dev.new()
+PlotScree(ev = res.mfa$mexPosition.Data$Table$eigs,
+          p.ev = NULL, max.ev = NULL, alpha = 0.05,
+          col.ns = "#006D2C", col.sig = "#54278F",
+          title = "Explained Variance per Dimension - MFA",plotKaiser = TRUE)
+MFAScree <- recordPlot()
+```
+**Scree plot gives us 5 components that are above the Kaiser Line**
+
+
+### Factor Maps
+```{r}
+baseMap.i <- createFactorMap(res.mfa$mexPosition.Data$Table$fi, 
+                             col.points = DESIGN$rows$JobLevel$color_observ,
+                             col.labels = 'darkorchid',title = "Partial Factor scores by Job Level",display.labels = FALSE,display.points = TRUE)  
+
+x_y_labels <- createxyLabels.gen(
+1,2, lambda = res.mfa$mexPosition.Data$Table$eigs,
+tau = res.mfa$mexPosition.Data$Table$t
+)
+#dev.new()
+
+print(baseMap.i$zeMap + x_y_labels)
+```
+
+### Loadings
+```{r}
+baseMap.j.12 <- createFactorMap(Fj, #constraints = constraints.sym,
+                             col.points = res.mfa$Plotting.Data$fj.col,col.labels = res.mfa$Plotting.Data$fj.col,
+                             display.labels = TRUE,display.points = TRUE,text.cex = 2.5,force=2,cex=1,
+                              title = "J Map for Dimension 1 & 2")
+
+
+#lines4J <- addLines4MCA(Fj, col4Var = col4Levels.imp$color4Variables, size = 1)
+
+Loadings_12 <- baseMap.j.12$zeMap+ x_y_labels
+
+print(Loadings_12)
+```
+
+
+## Inferences
+### Means
+```{r}
+#_____________________________________________________________________
+# Inferences
+
+#_____________________________________________________________________
+# Mean Map
+#  create the map for the means
+#  get the means by groups
+
+data_means <- PTCA4CATA::getMeans(res.mfa$mexPosition.Data$Table$fi, ibm.emp.data$JobLevel)
+rownames(data_means) = c("JL5","JL4","JL3","JL2","JL1")
+
+# the map
+MapGroup    <- PTCA4CATA::createFactorMap(data_means,
+                            # use the constraint from the main map
+                            #constraints = baseMap.i$constraints,
+                            col.points = DESIGN$rows$JobLevel$color_groups,
+                            cex = 7,  # size of the dot (bigger)
+                            display.labels = TRUE,
+                            col.labels = DESIGN$rows$JobLevel$color_groups,
+                            text.cex = 6)
+
+
+# The map with observations and group means
+a003.Map.I.withMeans <- baseMap.i$zeMap +
+                         MapGroup$zeMap_dots + MapGroup$zeMap_text + x_y_labels
+#dev.new()
+print(a003.Map.I.withMeans)
+```
+
+
+### Partial Factor Scores
+
+Here we calculate the partial factor scores with respect to the 3 tables that we created, to check the inertiaof each.
+```{r}
+
+#dim(res.mfa$mexPosition.Data$Table$partial.fi)
+data_means1 <- PTCA4CATA::getMeans(res.mfa$mexPosition.Data$Table$partial.fi[1:237,], ibm.emp.data$JobLevel)
+data_means2 <- PTCA4CATA::getMeans(res.mfa$mexPosition.Data$Table$partial.fi[238:474,], ibm.emp.data$JobLevel)
+data_means3 <- PTCA4CATA::getMeans(res.mfa$mexPosition.Data$Table$partial.fi[475:711,], ibm.emp.data$JobLevel)
+rownames(data_means1) = c("Income5","Income4","Income3","Income2","Income1")
+rownames(data_means2) = c("Ordinal5","Ordinal4","Ordinal3","Ordinal2","Ordinal1")
+rownames(data_means3) = c("Year5","Year4","Year3","Year2","Year1")
+
+# the map
+MapGroup1    <- PTCA4CATA::createFactorMap(data_means1,
+                            # use the constraint from the main map
+                            #constraints = baseMap.i$constraints,
+                            col.points = DESIGN$rows$JobLevel$color_groups,
+                            cex = 7,  # size of the dot (bigger)
+                            display.labels = TRUE,
+                            col.labels = DESIGN$rows$JobLevel$color_groups,
+                            text.cex = 6)
+
+MapGroup2    <- PTCA4CATA::createFactorMap(data_means2,
+                            # use the constraint from the main map
+                            #constraints = baseMap.i$constraints,
+                            col.points = DESIGN$rows$JobLevel$color_groups,
+                            cex = 7,  # size of the dot (bigger)
+                            display.labels = TRUE,
+                            col.labels = DESIGN$rows$JobLevel$color_groups,
+                            text.cex = 6)
+
+MapGroup3    <- PTCA4CATA::createFactorMap(data_means3,
+                            # use the constraint from the main map
+                            #constraints = baseMap.i$constraints,
+                            col.points = DESIGN$rows$JobLevel$color_groups,
+                            cex = 7,  # size of the dot (bigger)
+                            display.labels = TRUE,
+                            col.labels = DESIGN$rows$JobLevel$color_groups,
+                            text.cex = 6)
+
+partial_plot <- a003.Map.I.withMeans+MapGroup1$zeMap_dots + MapGroup1$zeMap_text+MapGroup2$zeMap_dots + MapGroup2$zeMap_text+MapGroup3$zeMap_dots + MapGroup3$zeMap_text
+print(partial_plot + x_y_labels)
+
+```
+
+### Confidence Intervals
+Confidence interval shows no overlap amongst the region of JOb Level except for between Job Level 1 & 2.
+```{r}
+# Confidence Intervals ----
+# Bootstrap for CI:
+BootCube <- PTCA4CATA::Boot4Mean(res.mfa$mexPosition.Data$Table$fi, 
+                                 design = DESIGN$rows$JobLevel$color_observ,
+                                 niter = 100,
+                                 suppressProgressBar = TRUE)
+
+
+GraphElli <- PTCA4CATA::MakeCIEllipses(BootCube$BootCube[,1:2,],
+                            names.of.factors = c("Dimension 1","Dimension 2"),
+                            col = rownames(BootCube$BootCube[,c(1,2),1]),
+                            p.level = .95
+)
+
+a004.Map.I.withCI <-  baseMap.i$zeMap + MapGroup$zeMap_text +  GraphElli
+
+#dev.new()
+print(a004.Map.I.withCI + x_y_labels)
+
+```
+
+
+
+### Contribution Plot
+
+```{r}
+#_____________________________________________________________________
+# Contribution Plots ----
+# get the Contributions and make a plot.
+#_____________________________________________________________________
+# Here we look only at the (signed) contributions for the variables
+# compute teh signed contributions
+signed.ctrJ <- res.mfa$mexPosition.Data$Table$cj * sign(res.mfa$mexPosition.Data$Table$Q)
+
+b003.ctrJ.s.1 <- PrettyBarPlot2(signed.ctrJ[,1],
+                         threshold = 1 / NROW(signed.ctrJ),
+                         font.size = 5,
+                         color4bar = gplots::col2hex(res.mfa$Plotting.Data$fj.col), # we need hex code
+                         main = 'Variable Contributions (Signed): Dimension 1',
+                         ylab = 'Contributions',
+                         ylim = c(1.2*min(signed.ctrJ), 1.2*max(signed.ctrJ))
+)
+#dev.new()
+print(b003.ctrJ.s.1)
+
+
+b004.ctrJ.s.2 <- PrettyBarPlot2(signed.ctrJ[,2],
+                           threshold = 1 / NROW(signed.ctrJ),
+                           font.size = 5,
+                           color4bar = gplots::col2hex(res.mfa$Plotting.Data$fj.col), # we need hex code
+                           main = 'Variable Contributions (Signed): Dimension 2',
+                           ylab = 'Contributions',
+                           ylim = c(1.2*min(signed.ctrJ), 1.2*max(signed.ctrJ))
+)
+#dev.new()
+print(b004.ctrJ.s.2)
+
+```
+**## Dimension1:**
+**Age,Monthly Income,TotalWorkingYears,YearsAtCompany,YearsInCurrentRole are all on the -ve side of Dimension1**
+**## Dimension2:**
+**WorkLifeBalance & TrainTimeLastYear are on the -ve side of Dimension2**
+
+
+
+
+
+**WorkLifeBalance and TrainingTimeLastYear are coming at extreme ends of dimension 2, hence are -vely correlated.**
+
+## Conclusion
+- In PArtial Factor score map, Year table had more inertia as compared to the other two for higher Job Levels
+- SO as Job Level increases, experience increases and it becomes an importatn factor compared to other variables
+
+
+
+
+
